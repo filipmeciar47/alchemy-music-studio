@@ -1,0 +1,11 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "RAILWAY_BACKEND_URL/api/:path*"
+    }
+  ],
+  "buildCommand": "pnpm --filter @workspace/music-studio run build",
+  "outputDirectory": "artifacts/music-studio/dist/public",
+  "installCommand": "pnpm install"
+}
