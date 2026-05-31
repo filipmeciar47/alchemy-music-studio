@@ -2,7 +2,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "RAILWAY_BACKEND_URL/api/:path*"
+      "destination": "https://workspaceapi-server-production-fb0d.up.railway.app/api/:path*"
     }
   ],
   "buildCommand": "pnpm --filter @workspace/music-studio run build",
