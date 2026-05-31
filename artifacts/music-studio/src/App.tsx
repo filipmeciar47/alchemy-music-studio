@@ -5,7 +5,8 @@ const TK={bg:"#0d0d0d",bgD:"#080808",bgP:"#111111",bgL:"#1a1a1a",ac:"#00ffaa",ac
 const TC=["#00d4aa","#7b68ee","#ff6b35","#ff4488","#44bbff","#ffcc00","#88ff44","#ff8844","#aa66ff","#66ffcc"];
 const TKC=["#00ffaa","#ff0066","#ffcc00","#00ccff","#ff6600","#cc44ff","#66ff44","#ff3388","#44ffcc","#ffaa00"];
 
-const FX0={gain:1,fadeIn:0,fadeOut:0,lpFreq:20000,hpFreq:20,saturation:0,delay:0,delayTime:.25,delayFb:.3,compress:0,loop:1};
+const FX0={gain:1,fadeIn:0,fadeOut:0,lpFreq:20000,hpFreq:20,saturation:0,delay:0,delayTime:.25,delayFb:.3,compress:0,loop:1,reverb:0,reverbDecay:1.5,chorus:0,chorusRate:.5,bitCrush:0};
+const SWATCH=["#ff6b35","#00d4aa","#7b68ee","#ff4488","#44bbff","#ffcc00","#88ff44","#ff8844","#aa66ff","#ff0066","#00ffaa","#e5523b","#66ccff","#ff99cc","#99ff66"];
 // EQ multiplier (0..3, 1=flat) -> dB for live BiquadFilter
 const eqDb=(m: number)=>m<=0?-40:Math.max(-40,Math.min(18,20*Math.log10(m)));
 
@@ -17,7 +18,10 @@ function analyze(b: AudioBuffer){const d=b.getChannelData(0);let mx=0,rm=0;for(l
 
 function drawWf(cv: HTMLCanvasElement|null,buf: AudioBuffer|undefined,sel: {start:number,end:number}|null,pos: number|null,th: any){if(!cv)return;const p=th||C;const x=cv.getContext("2d");if(!x)return;const w=cv.width,h=cv.height;x.fillStyle=p.wfBg;x.fillRect(0,0,w,h);x.strokeStyle=p.bd;x.lineWidth=.5;for(let i=1;i<10;i++){const px=(w/10)*i;x.beginPath();x.moveTo(px,0);x.lineTo(px,h);x.stroke();}x.beginPath();x.moveTo(0,h/2);x.lineTo(w,h/2);x.stroke();if(sel){x.fillStyle="rgba(255,107,53,.12)";x.fillRect(sel.start*w,0,(sel.end-sel.start)*w,h);}if(!buf)return;const d=buf.getChannelData(0),st=Math.max(1,Math.floor(d.length/w));x.beginPath();x.strokeStyle=p.wf;x.lineWidth=1;for(let i=0;i<w;i++){let mn=1,mx2=-1;for(let j=0;j<st;j++){const idx=i*st+j;if(idx<d.length){if(d[idx]<mn)mn=d[idx];if(d[idx]>mx2)mx2=d[idx];}}x.moveTo(i,(1-mx2)*h/2);x.lineTo(i,(1-mn)*h/2);}x.stroke();if(pos!=null){x.strokeStyle="#fff";x.lineWidth=1.5;x.beginPath();x.moveTo(pos*w,0);x.lineTo(pos*w,h);x.stroke();}}
 
-function applyFx(buf: AudioBuffer,fx: any,ctx: AudioContext){const len=buf.length,ch=buf.numberOfChannels,sr=buf.sampleRate,out=ctx.createBuffer(ch,len,sr);for(let c=0;c<ch;c++){const inp=buf.getChannelData(c),o=out.getChannelData(c);for(let j=0;j<len;j++)o[j]=inp[j];if(fx.gain!=null&&fx.gain!==1)for(let j=0;j<len;j++)o[j]*=fx.gain;if(fx.reverse)for(let j=0;j<len/2;j++){const t=o[j];o[j]=o[len-1-j];o[len-1-j]=t;}if(fx.normalize){let m=0;for(let j=0;j<len;j++){const a=Math.abs(o[j]);if(a>m)m=a;}if(m>0){const s=.95/m;for(let j=0;j<len;j++)o[j]*=s;}}if(fx.fadeIn>0){const s=Math.floor(fx.fadeIn*sr);for(let j=0;j<Math.min(s,len);j++)o[j]*=j/s;}if(fx.fadeOut>0){const s=Math.floor(fx.fadeOut*sr);for(let j=0;j<Math.min(s,len);j++)o[len-1-j]*=j/s;}if(fx.lpFreq!=null&&fx.lpFreq<20000){const rc=1/(2*Math.PI*fx.lpFreq),dt=1/sr,a=dt/(rc+dt);let p2=o[0];for(let j=1;j<len;j++){o[j]=p2+a*(o[j]-p2);p2=o[j];}}if(fx.hpFreq!=null&&fx.hpFreq>20){const rc=1/(2*Math.PI*fx.hpFreq),dt=1/sr,a=rc/(rc+dt);let p2=o[0],pi=o[0];for(let j=1;j<len;j++){const v=a*(p2+o[j]-pi);pi=o[j];o[j]=v;p2=v;}}if(fx.saturation>0)for(let j=0;j<len;j++)o[j]=Math.tanh(o[j]*(1+fx.saturation*3))/(1+fx.saturation*.5);if(fx.delay>0){const dt2=Math.floor((fx.delayTime||.25)*sr),fb=fx.delayFb||.4;for(let j=dt2;j<len;j++)o[j]+=o[j-dt2]*fb*fx.delay;}if(fx.compress>0){const th2=1-fx.compress*.7,rat=1+fx.compress*8;for(let j=0;j<len;j++){const a=Math.abs(o[j]);if(a>th2)o[j]*=(th2+(a-th2)/rat)/a;}}}return out;}
+function applyFx(buf: AudioBuffer,fx: any,ctx: AudioContext){const len=buf.length,ch=buf.numberOfChannels,sr=buf.sampleRate,out=ctx.createBuffer(ch,len,sr);for(let c=0;c<ch;c++){const inp=buf.getChannelData(c),o=out.getChannelData(c);for(let j=0;j<len;j++)o[j]=inp[j];if(fx.gain!=null&&fx.gain!==1)for(let j=0;j<len;j++)o[j]*=fx.gain;if(fx.reverse)for(let j=0;j<len/2;j++){const t=o[j];o[j]=o[len-1-j];o[len-1-j]=t;}if(fx.normalize){let m=0;for(let j=0;j<len;j++){const a=Math.abs(o[j]);if(a>m)m=a;}if(m>0){const s=.95/m;for(let j=0;j<len;j++)o[j]*=s;}}if(fx.fadeIn>0){const s=Math.floor(fx.fadeIn*sr);for(let j=0;j<Math.min(s,len);j++)o[j]*=j/s;}if(fx.fadeOut>0){const s=Math.floor(fx.fadeOut*sr);for(let j=0;j<Math.min(s,len);j++)o[len-1-j]*=j/s;}if(fx.lpFreq!=null&&fx.lpFreq<20000){const rc=1/(2*Math.PI*fx.lpFreq),dt=1/sr,a=dt/(rc+dt);let p2=o[0];for(let j=1;j<len;j++){o[j]=p2+a*(o[j]-p2);p2=o[j];}}if(fx.hpFreq!=null&&fx.hpFreq>20){const rc=1/(2*Math.PI*fx.hpFreq),dt=1/sr,a=rc/(rc+dt);let p2=o[0],pi=o[0];for(let j=1;j<len;j++){const v=a*(p2+o[j]-pi);pi=o[j];o[j]=v;p2=v;}}if(fx.saturation>0)for(let j=0;j<len;j++)o[j]=Math.tanh(o[j]*(1+fx.saturation*3))/(1+fx.saturation*.5);if(fx.delay>0){const dt2=Math.floor((fx.delayTime||.25)*sr),fb=fx.delayFb||.4;for(let j=dt2;j<len;j++)o[j]+=o[j-dt2]*fb*fx.delay;}if(fx.compress>0){const th2=1-fx.compress*.7,rat=1+fx.compress*8;for(let j=0;j<len;j++){const a=Math.abs(o[j]);if(a>th2)o[j]*=(th2+(a-th2)/rat)/a;}}
+    if(fx.chorus>0){const rate=fx.chorusRate||.5,depth=Math.floor((.003+fx.chorus*.009)*sr),wet=fx.chorus,tmp=new Float32Array(len);for(let j=0;j<len;j++){const lfo=Math.sin(2*Math.PI*rate*j/sr);const di=Math.floor(depth*(lfo*.5+.5));tmp[j]=j-di>=0?o[j-di]:0;}for(let j=0;j<len;j++)o[j]=o[j]*(1-wet*.4)+tmp[j]*wet*.4;}
+    if(fx.bitCrush>0){const bits=Math.max(1,Math.round(16-fx.bitCrush*14)),step=2/Math.pow(2,bits);for(let j=0;j<len;j++)o[j]=Math.round(o[j]/step)*step;}
+    if(fx.reverb>0){const wet=fx.reverb,decay=fx.reverbDecay||1.5,dry=new Float32Array(len);for(let j=0;j<len;j++)dry[j]=o[j];const taps=[.023,.031,.041,.053,.067,.083,.1,.13,.17];for(let t=0;t<taps.length;t++){const tapS=Math.floor(taps[t]*sr),g=wet*.28*Math.exp(-taps[t]*2.5/decay);for(let j=tapS;j<len;j++)o[j]+=dry[j-tapS]*g;}}}return out;}
 
 function trimSil(buf: AudioBuffer,ctx: AudioContext){const d=buf.getChannelData(0);let s=0,e=d.length-1;while(s<d.length&&Math.abs(d[s])<.01)s++;while(e>s&&Math.abs(d[e])<.01)e--;s=Math.max(0,s-80);e=Math.min(d.length-1,e+80);const l=e-s+1,o=ctx.createBuffer(buf.numberOfChannels,l,buf.sampleRate);for(let c=0;c<buf.numberOfChannels;c++){const src=buf.getChannelData(c),dst=o.getChannelData(c);for(let i=0;i<l;i++)dst[i]=src[s+i];}return o;}
 function cropT(buf: AudioBuffer,ss: number,es: number,ctx: AudioContext){const s=Math.max(0,Math.floor(ss*buf.sampleRate)),e=Math.min(buf.length,Math.floor(es*buf.sampleRate)),l=e-s;if(l<=0)return buf;const o=ctx.createBuffer(buf.numberOfChannels,l,buf.sampleRate);for(let c=0;c<buf.numberOfChannels;c++){const src=buf.getChannelData(c),dst=o.getChannelData(c);for(let i=0;i<l;i++)dst[i]=src[s+i];}return o;}
@@ -109,16 +113,36 @@ function synthBass(ctx: AudioContext,freq: number){const{b,sr,len}=mkB(ctx,.4),d
 function synthTom(ctx: AudioContext,freq: number){const{b,sr,len}=mkB(ctx,.3),d=b.getChannelData(0);let ph=0;const f0=freq||120;for(let i=0;i<len;i++){const t=i/sr;const f=f0*Math.exp(-t*6)+f0*.5;ph+=2*Math.PI*f/sr;const env=Math.exp(-t*9);d[i]=Math.sin(ph)*env*.82;}return b;}
 function synthRim(ctx: AudioContext){const{b,sr,len}=mkB(ctx,.05),d=b.getChannelData(0);let ph=0;for(let i=0;i<len;i++){const t=i/sr;ph+=2*Math.PI*1700/sr;const env=Math.exp(-t*120);d[i]=(Math.sin(ph)+(Math.random()*2-1)*.5)*env*.6;}return b;}
 function synthStab(ctx: AudioContext){const{b,sr,len}=mkB(ctx,.36),d=b.getChannelData(0);const fr=[110,130.81,164.81,220];for(let i=0;i<len;i++){const t=i/sr;const env=Math.min(1,t*200)*Math.exp(-t*7);let v=0;for(const f of fr)v+=2*((t*f)%1)-1;d[i]=Math.tanh(v/fr.length*1.4)*env*.42;}return b;}
+function synthAcid(ctx: AudioContext,note=0){const{b,sr,len}=mkB(ctx,.28),d=b.getChannelData(0);const f0=55*Math.pow(2,note/12);let ph=0,filt=0;for(let i=0;i<len;i++){const t=i/sr;ph+=2*Math.PI*f0/sr;const saw=2*((ph/(2*Math.PI))%1)-1;const env=Math.min(1,t*60)*Math.exp(-t*5);const cut=300+4000*Math.exp(-t*10);const rc=1/(2*Math.PI*cut),dt=1/sr,a=dt/(rc+dt);filt+=a*(saw-filt);d[i]=Math.tanh(filt*2.5)*env*.85;}return b;}
+function synthSub(ctx: AudioContext){const{b,sr,len}=mkB(ctx,.55),d=b.getChannelData(0);let ph=0;for(let i=0;i<len;i++){const t=i/sr;const f=42*Math.exp(-t*1.5)+32;ph+=2*Math.PI*f/sr;d[i]=Math.sin(ph)*Math.exp(-t*2.8)*.92;}return b;}
+function synthCymbal(ctx: AudioContext){const{b,sr,len}=mkB(ctx,.65),d=b.getChannelData(0);const fr=[4050,4840,5765,6843,7823,9100];for(let i=0;i<len;i++){const t=i/sr;const env=Math.exp(-t*7.5);let v=0;for(const f of fr)v+=Math.sin(2*Math.PI*f*t)*(Math.random()*.3+.7);d[i]=v/fr.length*env*.48;}return b;}
+function synthConga(ctx: AudioContext,freq=220){const{b,sr,len}=mkB(ctx,.28),d=b.getChannelData(0);let ph=0;for(let i=0;i<len;i++){const t=i/sr;const f=freq*Math.exp(-t*18)+freq*.45;ph+=2*Math.PI*f/sr;const env=Math.exp(-t*15);d[i]=(Math.sin(ph)*.7+(Math.random()*2-1)*.3)*env*.75;}return b;}
+function synthCowbell(ctx: AudioContext){const{b,sr,len}=mkB(ctx,.55),d=b.getChannelData(0);let p1=0,p2=0;for(let i=0;i<len;i++){const t=i/sr;p1+=2*Math.PI*540/sr;p2+=2*Math.PI*800/sr;d[i]=(Math.sin(p1)+Math.sin(p2))*.5*Math.exp(-t*11)*.62;}return b;}
+function synthGroove(ctx: AudioContext){const{b,sr,len}=mkB(ctx,.14),d=b.getChannelData(0);let ph=0,prev=0;for(let i=0;i<len;i++){const t=i/sr;ph+=2*Math.PI*900/sr;const n=Math.random()*2-1;const hp=n-prev;prev=n;d[i]=(Math.sin(ph)*.25+hp*.75)*Math.exp(-t*28)*.62;}return b;}
+function synthLead(ctx: AudioContext,freq=440){const{b,sr,len}=mkB(ctx,.32),d=b.getChannelData(0);let ph=0,ph2=0;for(let i=0;i<len;i++){const t=i/sr;ph+=2*Math.PI*freq/sr;ph2+=2*Math.PI*(freq*1.005)/sr;const env=Math.min(1,t*80)*Math.exp(-t*4.5);d[i]=Math.tanh((Math.sin(ph)+Math.sin(ph2)*.6)*1.8)*env*.5;}return b;}
+function synthPad(ctx: AudioContext){const{b,sr,len}=mkB(ctx,1.2),d=b.getChannelData(0);const fr=[110,130.8,164.8,220];for(let i=0;i<len;i++){const t=i/sr;const atk=Math.min(1,t*1.8),rel=1-Math.max(0,(t-.9)/.3);const env=atk*Math.max(0,rel);let v=0;for(const f of fr)v+=Math.sin(2*Math.PI*f*t+Math.sin(2*Math.PI*2.8*t)*.12);d[i]=v/fr.length*.38*env;}return b;}
+function synthKickHard(ctx: AudioContext){const{b,sr,len}=mkB(ctx,.35),d=b.getChannelData(0);let ph=0;for(let i=0;i<len;i++){const t=i/sr;const f=200*Math.exp(-t*70)+45;ph+=2*Math.PI*f/sr;const env=Math.exp(-t*6);let s=Math.tanh(Math.sin(ph)*8);s=Math.max(-1,Math.min(1,s*1.6));d[i]=s*env*.98;if(i<30)d[i]=Math.max(-1,Math.min(1,d[i]+(Math.random()*2-1)*.5*(1-i/30)));}return b;}
+function synthBassGroove(ctx: AudioContext){const{b,sr,len}=mkB(ctx,.45),d=b.getChannelData(0);let p1=0,p2=0;const f=72;for(let i=0;i<len;i++){const t=i/sr;p1+=2*Math.PI*f/sr;p2+=2*Math.PI*f*2.02/sr;const env=Math.min(1,t*120)*Math.exp(-t*3.8);const s1=2*((p1/(2*Math.PI))%1)-1,s2=2*((p2/(2*Math.PI))%1)-1;d[i]=Math.tanh((s1+s2*.4)*3.5)*env*.68;}return b;}
 function buildKit(ctx: AudioContext){return[
   {name:'Kick',buf:synthKick(ctx)},
+  {name:'KickHard',buf:synthKickHard(ctx)},
   {name:'Clap',buf:synthClap(ctx)},
+  {name:'Snare',buf:synthSnare(ctx)},
   {name:'HatClosed',buf:synthHat(ctx,false)},
   {name:'HatOpen',buf:synthHat(ctx,true)},
-  {name:'Bass',buf:synthBass(ctx,55)},
-  {name:'Snare',buf:synthSnare(ctx)},
-  {name:'Tom',buf:synthTom(ctx,110)},
-  {name:'Stab',buf:synthStab(ctx)},
+  {name:'Cymbal',buf:synthCymbal(ctx)},
   {name:'Rim',buf:synthRim(ctx)},
+  {name:'Conga',buf:synthConga(ctx,220)},
+  {name:'Cowbell',buf:synthCowbell(ctx)},
+  {name:'Groove',buf:synthGroove(ctx)},
+  {name:'Tom',buf:synthTom(ctx,110)},
+  {name:'Bass',buf:synthBass(ctx,55)},
+  {name:'BassGroove',buf:synthBassGroove(ctx)},
+  {name:'Sub',buf:synthSub(ctx)},
+  {name:'Acid',buf:synthAcid(ctx,0)},
+  {name:'Stab',buf:synthStab(ctx)},
+  {name:'Lead',buf:synthLead(ctx,440)},
+  {name:'Pad',buf:synthPad(ctx)},
 ];}
 // Random free-tekno / hardtek patterns (16 steps, 150-185 BPM). `s` = index into buildKit().
 // ratchets: per-step subdivisions (2-4) for rapid rolling kicks. swing kept tight.
@@ -201,6 +225,15 @@ export default function App(){
   const[fx,setFx]=useState({...FX0});
   const[masterVol,setMasterVol]=useState(1);
   const[cmdInput,setCmdInput]=useState('');
+  const[renameTarget,setRenameTarget]=useState<{idx:number,name:string}|null>(null);
+  const[showClips,setShowClips]=useState(false);
+  const[clips,setClips]=useState<any[]>([]);
+  const[clipSel,setClipSel]=useState<number|null>(null);
+  const[clipFx,setClipFx]=useState({...FX0});
+  const[clipHistory,setClipHistory]=useState<any[][]>([]);
+  const[seqPreviewBuf,setSeqPreviewBuf]=useState<AudioBuffer|null>(null);
+  const seqCvR=useRef<HTMLCanvasElement|null>(null);
+  let clipIdR=useRef(0);
 
   const channels=patterns[curPat]||[];
   const setChannels=(fn: any)=>setPatterns(p=>{const n=[...p];n[curPat]=typeof fn==='function'?fn(n[curPat]||[]):fn;return n;});
@@ -224,7 +257,8 @@ export default function App(){
   useEffect(()=>{const c=cvR.current;if(!c)return;const ro=new ResizeObserver(()=>{c.width=c.offsetWidth;c.height=c.offsetHeight;drawWf(c,cur?.buffer,wfSel,playPos,th);});ro.observe(c);return()=>ro.disconnect();},[cur,wfSel,playPos,th]);
   useEffect(()=>{const c=cvR.current;if(!c)return;c.width=c.offsetWidth;c.height=c.offsetHeight;drawWf(c,cur?.buffer,wfSel,playPos,th);},[cur,wfSel,playPos,th]);
 
-  const addSample=useCallback((name: string,buf: AudioBuffer)=>{if(!buf||!buf.duration)return;const info=analyze(buf);setSamples(p=>{const n=[...p,{name,buffer:buf,info,original:buf}];setSel(n.length-1);return n;});setLog(p=>[...p,`✓ "${name}" (${ft(buf.duration)})`]);},[]);
+  const addSample=useCallback((name: string,buf: AudioBuffer,color?: string,tag?: string)=>{if(!buf||!buf.duration)return;const info=analyze(buf);setSamples(p=>{const col=color||SWATCH[p.length%SWATCH.length];const n=[...p,{name,buffer:buf,info,original:buf,color:col,tag:tag||''}];setSel(n.length-1);return n;});setLog(p=>[...p,`✓ "${name}" (${ft(buf.duration)})`]);},[]);
+  useEffect(()=>{if(!seqCvR.current||!seqPreviewBuf)return;const c=seqCvR.current;c.width=c.offsetWidth;c.height=c.offsetHeight;drawWf(c,seqPreviewBuf,null,null,mode==='tekno'?TK:C);},[seqPreviewBuf,mode]);
   const handleFiles=useCallback(async(files: File[])=>{const ctx=getCtx();for(const f of files){if(!f.name.match(/\.(wav|mp3|ogg|flac|m4a|aac|webm)$/i)&&!f.type.startsWith('audio/'))continue;try{const ab=await f.arrayBuffer();const buf=await ctx.decodeAudioData(ab);addSample(f.name.replace(/\.[^.]+$/,''),buf);}catch(e){}}},[getCtx,addSample]);
 
   const playSmp=useCallback(()=>{if(!cur)return;const ctx=getCtx();if(ctx.state==='suspended')ctx.resume();stopSmp();const s=ctx.createBufferSource();s.buffer=cur.buffer;s.connect(ctx.destination);s.start();srcR.current=s;stR.current=ctx.currentTime;setPlaying(true);const u=()=>{const p=(ctx.currentTime-stR.current)/cur.buffer.duration;if(p>=1){setPlaying(false);setPlayPos(null);return;}setPlayPos(p);afR.current=requestAnimationFrame(u);};afR.current=requestAnimationFrame(u);s.onended=()=>{setPlaying(false);setPlayPos(null);};},[cur,getCtx]);
@@ -444,13 +478,15 @@ export default function App(){
         <div style={{flex:1,overflow:'auto',padding:4}} onDrop={e=>{e.preventDefault();if(e.dataTransfer.files)handleFiles(Array.from(e.dataTransfer.files));}} onDragOver={e=>e.preventDefault()}>
           {!samples.length&&<div style={{padding:20,textAlign:'center',color:th.txD,fontSize:11}}>Drag & drop audio files</div>}
           {samples.map((s,i)=>(
-            <div key={i} style={{padding:'6px 8px',margin:2,borderRadius:4,cursor:'pointer',display:'flex',alignItems:'center',gap:4,background:i===sel?th.bgL:'transparent',border:`1px solid ${i===sel?th.ac:'transparent'}`,transition:'all 0.1s'}}>
+            <div key={i} style={{padding:'5px 6px',margin:2,borderRadius:4,cursor:'pointer',display:'flex',alignItems:'center',gap:4,background:i===sel?th.bgL:'transparent',border:`1px solid ${i===sel?(s.color||th.ac):'transparent'}`,transition:'all 0.1s'}}>
+              <div style={{width:8,height:8,borderRadius:'50%',background:s.color||th.ac,flexShrink:0,cursor:'pointer'}} onClick={()=>{const nc=SWATCH[(SWATCH.indexOf(s.color)+1)%SWATCH.length];setSamples(p=>p.map((x,j)=>j===i?{...x,color:nc}:x));}} title="Klikni na zmenu farby"/>
               <div onClick={()=>{setSel(i);setWfSel(null);}} style={{flex:1,minWidth:0}}>
                 <div style={{fontSize:11,fontWeight:i===sel?600:400,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{s.name}</div>
-                <div style={{fontSize:9,color:th.txD}}>{ft(s.info.duration)}{s.info.bpm?` ${s.info.bpm}`:''}</div>
+                <div style={{fontSize:9,color:th.txD}}>{ft(s.info.duration)}{s.info.bpm?` ${s.info.bpm}bpm`:''}{s.tag?<span style={{marginLeft:4,background:s.color+'33',color:s.color,padding:'1px 4px',borderRadius:3,fontSize:8}}>{s.tag}</span>:null}</div>
               </div>
+              <button onClick={()=>setRenameTarget({idx:i,name:s.name})} style={{background:'none',border:'none',color:th.txD,cursor:'pointer',fontSize:10,padding:'2px 3px',borderRadius:3}} title="Premenovať">✎</button>
               <button onClick={()=>addCh(i)} title="Add to Sequencer" style={{background:'none',border:'none',color:th.ac2,cursor:'pointer',fontSize:10,fontWeight:600,padding:4,borderRadius:3}}>+SEQ</button>
-              <button onClick={()=>{setSamples(p=>p.filter((_,j)=>j!==i));if(sel===i)setSel(null);else if(sel&&sel>i)setSel(p=>(p as number)-1);}} style={{background:'none',border:'none',color:th.txD,cursor:'pointer',fontSize:12,padding:4,borderRadius:3}}>x</button>
+              <button onClick={()=>{setSamples(p=>p.filter((_,j)=>j!==i));if(sel===i)setSel(null);else if(sel!=null&&sel>i)setSel(p=>(p as number)-1);}} style={{background:'none',border:'none',color:th.txD,cursor:'pointer',fontSize:12,padding:4,borderRadius:3}}>x</button>
             </div>
           ))}
         </div>
@@ -504,7 +540,82 @@ export default function App(){
               <button onClick={()=>{if(samples.length)addCh(addSel);}} disabled={!samples.length} style={{...b1(true,null,th),fontSize:11,padding:'4px 12px',fontWeight:700}} title="Pridať vybraný zvuk ako novú stopu">Pridať stopu</button>
             </div>
 
+            {/* SEQ Overview waveform */}
+            <div style={{marginBottom:8,background:th.bgD,borderRadius:6,border:`1px solid ${th.bd}`,overflow:'hidden'}}>
+              <div style={{display:'flex',alignItems:'center',gap:6,padding:'4px 8px',borderBottom:`1px solid ${th.bd}`}}>
+                <span style={{fontSize:9,fontWeight:700,color:th.txD,letterSpacing:1,flex:1}}>SEQ PREHĽAD</span>
+                <button style={{...sb(false,th.ac2,th),fontSize:9,padding:'2px 8px'}} onClick={()=>{const ctx=getCtx();const buf=bouncePat(channels,samples,bpm,stepCount,swing,ctx);setSeqPreviewBuf(buf);}} disabled={!channels.length}>Render</button>
+                {seqPreviewBuf&&<button style={{...sb(false,null,th),fontSize:9,padding:'2px 8px'}} onClick={()=>{if(!seqPreviewBuf)return;const ctx=getCtx();const s=ctx.createBufferSource();s.buffer=seqPreviewBuf;s.connect(ctx.destination);s.start();}}>▶</button>}
+              </div>
+              <canvas ref={seqCvR} style={{width:'100%',height:56,display:'block'}}/>
+            </div>
+
             {!channels.length&&<div style={{textAlign:'center',color:th.txD,margin:'28px 12px',fontSize:12,lineHeight:1.7}}>Zatiaľ žiadne stopy v hlavnom tracku.<br/>Pridaj zvuk hore (＋ ZVUK), načítaj <b>Tekno Kit</b>, alebo <b>pretiahni audio súbor z PC</b> priamo sem.</div>}
+
+            {/* CLIPS sub-layer */}
+            <div style={{marginBottom:8,background:th.bgD,borderRadius:6,border:`1px solid ${th.bd}`}}>
+              <div style={{display:'flex',alignItems:'center',gap:6,padding:'5px 8px',borderBottom:showClips?`1px solid ${th.bd}`:'none',cursor:'pointer'}} onClick={()=>setShowClips(p=>!p)}>
+                <span style={{fontSize:9,fontWeight:700,color:th.ac3,letterSpacing:1,flex:1}}>⬓ CLIPS — uprav & vlož zvuky do SEQ {showClips?'▲':'▼'}</span>
+                {showClips&&clips.length>0&&<button style={{...sb(false,null,th),fontSize:9,padding:'2px 8px'}} onClick={e=>{e.stopPropagation();if(clipHistory.length){const prev=clipHistory[clipHistory.length-1];setClips(prev);setClipHistory(p=>p.slice(0,-1));}}} title="Vráť späť posledný krok">↩ Undo</button>}
+                {showClips&&<button style={{...sb(false,th.ac3,th),fontSize:9,padding:'2px 8px'}} onClick={e=>{e.stopPropagation();if(!samples.length)return;clipIdR.current++;setClipHistory(p=>[...p,clips]);setClips(p=>[...p,{id:clipIdR.current,sampleIdx:addSel,startBeat:0,endBeat:Math.min(stepCount,Math.ceil(samples[addSel]?.info.duration/(60/bpm/4)||4)),trimS:0,trimE:1,vol:.8,fx:{...FX0},name:samples[addSel]?.name||'clip'}]);setClipSel(clipIdR.current);}} disabled={!samples.length}>+ Pridať clip</button>}
+              </div>
+              {showClips&&<div style={{padding:8}}>
+                {!clips.length&&<div style={{fontSize:11,color:th.txD,textAlign:'center',padding:'12px 0'}}>Pridaj clip zo zvukov v knižnici → uprav → vlož do SEQ ako stopu</div>}
+                {clips.map((cl,ci)=>{const s=samples[cl.sampleIdx];const col=s?.color||SWATCH[ci%SWATCH.length];const isS=clipSel===cl.id;
+                  return(<div key={cl.id} style={{marginBottom:6,border:`1px solid ${isS?col:th.bd}`,borderRadius:5,overflow:'hidden'}}>
+                    <div style={{display:'flex',alignItems:'center',gap:6,padding:'4px 8px',background:isS?col+'22':th.bgP,cursor:'pointer'}} onClick={()=>{setClipSel(isS?null:cl.id);if(!isS)setClipFx({...cl.fx});}}>
+                      <div style={{width:8,height:8,borderRadius:'50%',background:col,flexShrink:0}}/>
+                      <span style={{fontSize:11,fontWeight:600,color:col,flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{cl.name||s?.name||'?'}</span>
+                      <span style={{fontSize:9,color:th.txD}}>beat {cl.startBeat+1}–{cl.endBeat}</span>
+                      <button style={{...sb(false,th.ac2,th),fontSize:9,padding:'2px 8px'}} onClick={e=>{e.stopPropagation();const ctx=getCtx();let buf=s?.buffer;if(!buf)return;const dur=buf.duration;const ts=cl.trimS*dur,te=cl.trimE*dur;if(te>ts)buf=cropT(buf,ts,te,ctx);if(cl.fx&&JSON.stringify(cl.fx)!==JSON.stringify(FX0)){buf=applyFx(buf,cl.fx,ctx);if(cl.fx.loop>1)buf=mkLoop(buf,cl.fx.loop,.02,ctx);}const nc=MKCH(stepCount);nc.sampleIdx=cl.sampleIdx;nc.vol=cl.vol;const beatsPerStep=1;const startStep=Math.min(stepCount-1,Math.floor(cl.startBeat*beatsPerStep));nc.steps[startStep]=true;setChannels((p:any[])=>[...p,nc]);setLog(p=>[...p,`▸ Clip "${cl.name}" → SEQ stopa (krok ${startStep+1})`]);}} title="Vlož do SEQ ako novú stopu">→ SEQ</button>
+                      <button style={{background:'none',border:'none',color:th.txD,cursor:'pointer',fontSize:12,padding:'0 3px'}} onClick={e=>{e.stopPropagation();setClipHistory(p=>[...p,clips]);setClips(p=>p.filter(x=>x.id!==cl.id));if(clipSel===cl.id)setClipSel(null);}}>×</button>
+                    </div>
+                    {isS&&<div style={{padding:8,background:th.bgD,display:'flex',flexDirection:'column',gap:8}}>
+                      <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
+                        <div style={{flex:1,minWidth:200}}>
+                          <div style={{fontSize:9,color:th.txD,marginBottom:2}}>Názov</div>
+                          <input value={cl.name||''} onChange={e=>{const v=e.target.value;setClips(p=>p.map(x=>x.id===cl.id?{...x,name:v}:x));}} style={{width:'100%',background:th.bgL,color:th.tx,border:`1px solid ${th.bd}`,borderRadius:3,padding:'3px 6px',fontSize:11,fontFamily:'inherit'}}/>
+                        </div>
+                        <div style={{flex:1,minWidth:120}}>
+                          <div style={{fontSize:9,color:th.txD,marginBottom:2}}>Zvuk</div>
+                          <select value={cl.sampleIdx} onChange={e=>{const v=+e.target.value;setClips(p=>p.map(x=>x.id===cl.id?{...x,sampleIdx:v,name:samples[v]?.name||x.name}:x));}} style={{width:'100%',background:th.bgL,color:th.tx,border:`1px solid ${th.bd}`,borderRadius:3,fontSize:10,padding:3}}>{samples.map((s2,i)=><option key={i} value={i}>{s2.name}</option>)}</select>
+                        </div>
+                        <div style={{display:'flex',flexDirection:'column',gap:2}}>
+                          <div style={{fontSize:9,color:th.txD}}>Hlasitosť: {(cl.vol*100).toFixed(0)}%</div>
+                          <input type="range" min={0} max={1.5} step={.01} value={cl.vol} onChange={e=>setClips(p=>p.map(x=>x.id===cl.id?{...x,vol:+e.target.value}:x))} style={{width:100,accentColor:col}}/>
+                        </div>
+                      </div>
+                      <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                        <div style={{flex:1,minWidth:120}}>
+                          <div style={{fontSize:9,color:th.txD,marginBottom:2}}>Orezať začiatok: {(cl.trimS*100).toFixed(0)}%</div>
+                          <input type="range" min={0} max={.99} step={.01} value={cl.trimS} onChange={e=>setClips(p=>p.map(x=>x.id===cl.id?{...x,trimS:Math.min(+e.target.value,x.trimE-.01)}:x))} style={{width:'100%',accentColor:col}}/>
+                        </div>
+                        <div style={{flex:1,minWidth:120}}>
+                          <div style={{fontSize:9,color:th.txD,marginBottom:2}}>Orezať koniec: {(cl.trimE*100).toFixed(0)}%</div>
+                          <input type="range" min={.01} max={1} step={.01} value={cl.trimE} onChange={e=>setClips(p=>p.map(x=>x.id===cl.id?{...x,trimE:Math.max(+e.target.value,x.trimS+.01)}:x))} style={{width:'100%',accentColor:col}}/>
+                        </div>
+                        <div style={{flex:1,minWidth:100}}>
+                          <div style={{fontSize:9,color:th.txD,marginBottom:2}}>Beat pozícia: {cl.startBeat+1}</div>
+                          <input type="range" min={0} max={Math.max(0,stepCount-1)} step={1} value={cl.startBeat} onChange={e=>setClips(p=>p.map(x=>x.id===cl.id?{...x,startBeat:+e.target.value}:x))} style={{width:'100%',accentColor:col}}/>
+                        </div>
+                      </div>
+                      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))',gap:6}}>
+                        {([['Skreslenie',(clipFx.saturation*100).toFixed(0)+'%','saturation',0,1,.01],['Reverb',(clipFx.reverb*100).toFixed(0)+'%','reverb',0,1,.01],['Chorus',(clipFx.chorus*100).toFixed(0)+'%','chorus',0,1,.01],['Bitcrusher',(clipFx.bitCrush*100).toFixed(0)+'%','bitCrush',0,1,.01],['Filter LP',clipFx.lpFreq>=20000?'OFF':(clipFx.lpFreq/1000).toFixed(1)+'k','lpFreq',200,20000,100],['Delay',(clipFx.delay*100).toFixed(0)+'%','delay',0,1,.01],['Kompresia',(clipFx.compress*100).toFixed(0)+'%','compress',0,1,.01]] as [string,string,string,number,number,number][]).map(([lbl,val,key,mn,mx,st])=>(
+                          <div key={key} style={{background:th.bgP,border:`1px solid ${th.bd}`,borderRadius:4,padding:'5px 8px'}}>
+                            <div style={{display:'flex',justifyContent:'space-between',marginBottom:3}}><span style={{fontSize:9,color:th.txD}}>{lbl}</span><span style={{fontSize:10,color:col,fontWeight:700}}>{val}</span></div>
+                            <input type="range" min={mn} max={mx} step={st} value={(clipFx as any)[key]} onChange={e=>{const nf={...clipFx,[key]:+e.target.value};setClipFx(nf);setClips(p=>p.map(x=>x.id===cl.id?{...x,fx:nf}:x));}} style={{width:'100%',accentColor:col}}/>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+                        <button style={{...sb(false,th.ac2,th),padding:'4px 12px'}} onClick={()=>{const ctx=getCtx();if(ctx.state==='suspended')ctx.resume();let buf=s?.buffer;if(!buf)return;const ts=cl.trimS*buf.duration,te=cl.trimE*buf.duration;if(te>ts)buf=cropT(buf,ts,te,ctx);buf=applyFx(buf,clipFx,ctx);if(clipFx.loop>1)buf=mkLoop(buf,clipFx.loop,.02,ctx);const src=ctx.createBufferSource();src.buffer=buf;src.connect(ctx.destination);src.start();}}>▶ Vypočuť</button>
+                        <button style={{...sb(false,null,th),padding:'4px 12px'}} onClick={()=>{const ctx=getCtx();let buf=s?.buffer;if(!buf)return;const ts=cl.trimS*buf.duration,te=cl.trimE*buf.duration;if(te>ts)buf=cropT(buf,ts,te,ctx);buf=applyFx(buf,clipFx,ctx);if(clipFx.loop>1)buf=mkLoop(buf,clipFx.loop,.02,ctx);addSample((cl.name||s?.name||'clip')+'_edit',buf);setLog(p=>[...p,`▸ Clip uložený ako nová vzorka`]);}}>Uložiť ako vzorku</button>
+                      </div>
+                    </div>}
+                  </div>);
+                })}
+              </div>}
+            </div>
 
             {channels.length>0&&<>
               {/* Main track ruler / playhead */}
@@ -602,6 +713,11 @@ export default function App(){
                   ['Echo čas',fx.delayTime.toFixed(2)+'s','delayTime',.05,.6,.01],
                   ['Kompresia',(fx.compress*100).toFixed(0)+'%','compress',0,1,.01],
                   ['Dĺžka (loop ×)',fx.loop+'×','loop',1,8,1],
+                  ['Reverb',(fx.reverb*100).toFixed(0)+'%','reverb',0,1,.01],
+                  ['Reverb dĺžka',fx.reverbDecay.toFixed(1)+'s','reverbDecay',.3,4,.1],
+                  ['Chorus',(fx.chorus*100).toFixed(0)+'%','chorus',0,1,.01],
+                  ['Chorus rýchlosť',fx.chorusRate.toFixed(1)+'Hz','chorusRate',.1,5,.1],
+                  ['Bitcrusher',(fx.bitCrush*100).toFixed(0)+'%','bitCrush',0,1,.01],
                 ] as [string,string,keyof typeof fx,number,number,number][]).map(([label,val,key,min,max,step])=>(
                   <div key={key} style={{background:th.bgD,border:`1px solid ${th.bd}`,borderRadius:6,padding:'8px 10px'}}>
                     <div style={{display:'flex',justifyContent:'space-between',marginBottom:6}}>
@@ -692,6 +808,27 @@ export default function App(){
     </div>
 
     <div style={{padding:'4px 12px',background:th.bgD,borderTop:`1px solid ${th.bd}`,fontSize:10,fontWeight:600,color:th.txD,display:'flex',gap:12,flexShrink:0}}>
+
+    {/* Rename modal */}
+    {renameTarget&&(
+      <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.75)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:998}} onClick={()=>setRenameTarget(null)}>
+        <div onClick={e=>e.stopPropagation()} style={{background:th.bgD,border:`1px solid ${th.bd}`,borderRadius:8,padding:24,minWidth:320,display:'flex',flexDirection:'column',gap:12,boxShadow:'0 10px 30px rgba(0,0,0,.5)'}}>
+          <div style={{fontSize:14,fontWeight:700,color:th.ac}}>Premenovať vzorku</div>
+          <input autoFocus value={renameTarget.name} onChange={e=>setRenameTarget(p=>p?{...p,name:e.target.value}:null)} onKeyDown={e=>{if(e.key==='Enter'){setSamples(p=>p.map((s,i)=>i===renameTarget.idx?{...s,name:renameTarget.name}:s));setLog(p=>[...p,`✎ Premenované na "${renameTarget.name}"`]);setRenameTarget(null);}if(e.key==='Escape')setRenameTarget(null);}} style={{background:th.bgL,color:th.tx,border:`1px solid ${th.ac}`,borderRadius:4,padding:'8px 12px',fontSize:13,outline:'none',fontFamily:'inherit'}}/>
+          <div>
+            <div style={{fontSize:11,color:th.txD,marginBottom:4}}>Kategória / tag</div>
+            <input placeholder="napr. kick, bass, ambient..." value={samples[renameTarget.idx]?.tag||''} onChange={e=>{const v=e.target.value;setSamples(p=>p.map((s,i)=>i===renameTarget.idx?{...s,tag:v}:s));}} style={{width:'100%',background:th.bgL,color:th.tx,border:`1px solid ${th.bd}`,borderRadius:4,padding:'6px 10px',fontSize:12,outline:'none',fontFamily:'inherit'}}/>
+          </div>
+          <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+            {SWATCH.map(col=><div key={col} onClick={()=>setSamples(p=>p.map((s,i)=>i===renameTarget.idx?{...s,color:col}:s))} style={{width:20,height:20,borderRadius:'50%',background:col,cursor:'pointer',border:`2px solid ${samples[renameTarget.idx]?.color===col?'#fff':'transparent'}`,transition:'border .1s'}}/>)}
+          </div>
+          <div style={{display:'flex',gap:8,justifyContent:'flex-end'}}>
+            <button style={{...sb(false,null,th),padding:'6px 14px'}} onClick={()=>setRenameTarget(null)}>Zrušiť</button>
+            <button style={{...b1(true,null,th),padding:'6px 14px',fontWeight:700}} onClick={()=>{setSamples(p=>p.map((s,i)=>i===renameTarget.idx?{...s,name:renameTarget.name}:s));setLog(p=>[...p,`✎ Premenované na "${renameTarget.name}"`]);setRenameTarget(null);}}>Uložiť</button>
+          </div>
+        </div>
+      </div>
+    )}
 
     {/* Export dialog */}
     {exportAudio&&(
