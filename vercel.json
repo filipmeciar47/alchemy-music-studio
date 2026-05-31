@@ -5,7 +5,7 @@
       "destination": "https://workspaceapi-server-production-fb0d.up.railway.app/api/:path*"
     }
   ],
-  "buildCommand": "pnpm --filter @workspace/music-studio run build",
+  "buildCommand": "pnpm rebuild esbuild && pnpm --filter @workspace/music-studio run build",
   "outputDirectory": "artifacts/music-studio/dist/public",
-  "installCommand": "pnpm install && pnpm rebuild esbuild"
+  "installCommand": "pnpm install --ignore-scripts"
 }
