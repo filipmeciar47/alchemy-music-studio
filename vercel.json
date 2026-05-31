@@ -7,5 +7,5 @@
   ],
   "buildCommand": "pnpm --filter @workspace/music-studio run build",
   "outputDirectory": "artifacts/music-studio/dist/public",
-  "installCommand": "pnpm install"
+  "installCommand": "pnpm install && pnpm rebuild esbuild"
 }
