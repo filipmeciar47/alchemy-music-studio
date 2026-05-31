@@ -144,30 +144,48 @@ function buildKit(ctx: AudioContext){return[
   {name:'Lead',buf:synthLead(ctx,440)},
   {name:'Pad',buf:synthPad(ctx)},
 ];}
-// Random free-tekno / hardtek patterns (16 steps, 150-185 BPM). `s` = index into buildKit().
-// ratchets: per-step subdivisions (2-4) for rapid rolling kicks. swing kept tight.
+// Kit indices: 0=Kick,1=KickHard,2=Clap,3=Snare,4=HatClosed,5=HatOpen,6=Cymbal,7=Rim
+//              8=Conga,9=Cowbell,10=Groove,11=Tom,12=Bass,13=BassGroove,14=Sub,15=Acid,16=Stab,17=Lead,18=Pad
 const KIT_PATTERNS: {s:number,steps:number[],ratchets?:number[],isKick?:boolean,sidechain?:boolean,vol:number}[][]=[
-  // Driving 4x4 with end roll
+  // Driving 4x4 hardtek + end roll
   [
     {s:0,steps:[1,0,0,0,1,0,0,0,1,0,0,0,1,0,1,1],ratchets:[1,1,1,1,1,1,1,1,1,1,1,1,1,1,2,3],isKick:true,vol:1},
-    {s:4,steps:[0,0,1,0,0,0,1,0,0,0,1,0,0,0,1,0],sidechain:true,vol:.75},
-    {s:2,steps:[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],vol:.34},
-    {s:1,steps:[0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0],vol:.8},
+    {s:12,steps:[0,0,1,0,0,0,1,0,0,0,1,0,0,0,1,0],sidechain:true,vol:.75},
+    {s:4,steps:[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],vol:.34},
+    {s:2,steps:[0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0],vol:.8},
   ],
-  // Rolling hardtek (offbeat kicks)
+  // Rolling hardtek offbeat kicks + acid
   [
     {s:0,steps:[1,0,0,1,0,0,1,0,1,0,0,1,0,0,1,1],ratchets:[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,3],isKick:true,vol:1},
-    {s:4,steps:[0,0,1,0,1,0,0,1,0,0,1,0,1,0,0,1],sidechain:true,vol:.72},
-    {s:3,steps:[0,0,1,0,0,0,1,0,0,0,1,0,0,0,1,0],vol:.42},
-    {s:1,steps:[0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0],vol:.78},
+    {s:12,steps:[0,0,1,0,1,0,0,1,0,0,1,0,1,0,0,1],sidechain:true,vol:.72},
+    {s:5,steps:[0,0,1,0,0,0,1,0,0,0,1,0,0,0,1,0],vol:.42},
+    {s:15,steps:[1,0,0,1,0,0,1,0,0,1,0,0,1,0,0,0],vol:.65},
+    {s:2,steps:[0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0],vol:.78},
   ],
-  // Galloping with stab
+  // Galloping + stab + groove
   [
     {s:0,steps:[1,0,1,0,1,0,0,1,1,0,1,0,1,0,0,1],ratchets:[1,1,1,1,1,1,1,2,1,1,1,1,1,1,1,2],isKick:true,vol:1},
-    {s:4,steps:[0,0,0,1,0,0,0,1,0,0,0,1,0,0,0,1],sidechain:true,vol:.7},
-    {s:2,steps:[0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1],vol:.38},
-    {s:7,steps:[0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0],vol:.42},
-    {s:1,steps:[0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0],vol:.75},
+    {s:12,steps:[0,0,0,1,0,0,0,1,0,0,0,1,0,0,0,1],sidechain:true,vol:.7},
+    {s:4,steps:[0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1],vol:.38},
+    {s:16,steps:[0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0],vol:.42},
+    {s:2,steps:[0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0],vol:.75},
+    {s:10,steps:[0,0,0,1,0,0,0,1,0,0,0,1,0,0,0,1],vol:.4},
+  ],
+  // BassGroove + KickHard + Conga + Hat
+  [
+    {s:1,steps:[1,0,0,0,1,0,0,0,1,0,0,0,1,0,0,0],ratchets:[1,1,1,1,1,1,1,1,1,1,1,1,2,1,1,1],isKick:true,vol:1},
+    {s:13,steps:[1,0,0,1,1,0,1,0,1,0,0,1,1,0,1,0],sidechain:true,vol:.8},
+    {s:8,steps:[0,0,1,0,0,0,1,0,0,0,1,0,0,1,0,1],vol:.6},
+    {s:4,steps:[1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0],vol:.3},
+    {s:3,steps:[0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0],vol:.7},
+  ],
+  // Acid + Sub + Cymbal minimal
+  [
+    {s:0,steps:[1,0,0,0,0,0,1,0,1,0,0,0,0,0,1,0],ratchets:[1,1,1,1,1,1,1,1,2,1,1,1,1,1,1,1],isKick:true,vol:1},
+    {s:14,steps:[1,0,0,0,1,0,0,0,1,0,0,0,1,0,0,0],sidechain:true,vol:.9},
+    {s:15,steps:[0,0,1,0,0,1,0,0,1,0,0,1,0,0,1,1],vol:.7},
+    {s:6,steps:[0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,1],vol:.5},
+    {s:7,steps:[0,1,0,1,0,1,0,0,0,1,0,1,0,1,0,0],vol:.4},
   ],
 ];
 
@@ -177,7 +195,8 @@ const SYSP_CL=`ROLA: AI producent. Slovenčina. STRUČNE - max 2 vety v message.
 FORMÁT: Odpovedaj VÝHRADNE platným JSON bez markdown. Žiadny text pred ani za JSON.
 {"message":"krátka odpoveď","commands":[{"op":"..."}]}
 
-OPS: select(sample), trim_silence, crop_time(start,end), split(time), merge(samples:[0,1],gaps:[0.5],name), loop(times,crossfade), effects(params:{gain,lpFreq,hpFreq,saturation,fadeIn,fadeOut,normalize,reverse,delay,delayTime,delayFb,compress}), rename(name), duplicate(newName), create_from(source,newName,operations:[]), add_channel(sample,steps:[1,0,...],volume,pan,pitch,eqLow,eqMid,eqHigh), set_channel(channel,volume,pan,pitch,steps,eqLow,eqMid,eqHigh,mute,solo), shift_channel(channel,steps:N — posun stopy v čase: +N neskôr/vpravo, -N skôr/vľavo, 1 krok=1/16 taktu), set_bpm(bpm), bounce_pattern(name), export, export_pattern
+OPS: select(sample), trim_silence, crop_time(start,end), split(time), merge(samples:[0,1],gaps:[0.5],name), loop(times,crossfade), effects(params:{gain,lpFreq,hpFreq,saturation,fadeIn,fadeOut,normalize,reverse,delay,delayTime,delayFb,compress,reverb,reverbDecay,chorus,chorusRate,bitCrush}), rename(name), duplicate(newName), create_from(source,newName,operations:[]), add_channel(sample,steps:[1,0,...],volume,pan,pitch,eqLow,eqMid,eqHigh), set_channel(channel,volume,pan,pitch,steps,eqLow,eqMid,eqHigh,mute,solo), shift_channel(channel,steps:N — posun stopy v čase: +N neskôr/vpravo, -N skôr/vľavo, 1 krok=1/16 taktu), set_bpm(bpm), bounce_pattern(name), export, export_pattern
+EFEKTY: reverb(0-1)+reverbDecay(0.3-4s)=dozvuk; chorus(0-1)=chorus/flanger; bitCrush(0-1)=bitcrusher/lo-fi; saturation=skreslenie; delay=echo. Kombinuj pre zaujímavé zvuky.
 
 LIVE MIXING: na stíšenie/zhlasnenie stopy použi set_channel(volume), mute(true/false), pan, eqLow/Mid/High (1=neutrál). Na posun zvuku v čase ("posuň kick neskôr/skôr") použi shift_channel.
 
@@ -192,6 +211,7 @@ OPS (klasické + tekno):
 split(time), merge(samples:[],gaps:[],name) — rozdeľ a spájaj vzorky
 add_channel: +velocities[0-127], ratchets[1-4], sidechain(bool), isKick(bool)
 set_channel: +velocities, ratchets, sidechain, isKick, filterAuto[0-1]
+effects: params={gain,saturation,lpFreq,hpFreq,delay,delayTime,compress,reverb,reverbDecay,chorus,chorusRate,bitCrush,fadeIn,fadeOut,normalize,reverse}
 shift_channel(channel,steps:N) — posun stopy v čase: +N neskôr/vpravo, -N skôr (napr. "posuň kick neskôr"). 1 krok = 1/16 taktu.
 LIVE MIX: set_channel(volume,mute,pan,eqLow/Mid/High) — stíš/zhlasni/uprav stopu naživo počas hrania.
 set_swing(swing:50-75), set_pattern(pattern:0-7), copy_pattern(from,to)
