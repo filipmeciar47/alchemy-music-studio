@@ -5,7 +5,7 @@ const TK={bg:"#0d0d0d",bgD:"#080808",bgP:"#111111",bgL:"#1a1a1a",ac:"#00ffaa",ac
 const TC=["#00d4aa","#7b68ee","#ff6b35","#ff4488","#44bbff","#ffcc00","#88ff44","#ff8844","#aa66ff","#66ffcc"];
 const TKC=["#00ffaa","#ff0066","#ffcc00","#00ccff","#ff6600","#cc44ff","#66ff44","#ff3388","#44ffcc","#ffaa00"];
 
-const FX0={gain:1,fadeIn:0,fadeOut:0,lpFreq:20000,hpFreq:20,saturation:0,delay:0,delayTime:.25,delayFb:.3,compress:0,loop:1,reverb:0,reverbDecay:1.5,chorus:0,chorusRate:.5,bitCrush:0};
+const FX0={gain:1,fadeIn:0,fadeOut:0,lpFreq:20000,hpFreq:20,saturation:0,delay:0,delayTime:.25,delayFb:.3,compress:0,loop:1,reverb:0,reverbDecay:1.5,chorus:0,chorusRate:.5,bitCrush:0,speed:1};
 const SWATCH=["#ff6b35","#00d4aa","#7b68ee","#ff4488","#44bbff","#ffcc00","#88ff44","#ff8844","#aa66ff","#ff0066","#00ffaa","#e5523b","#66ccff","#ff99cc","#99ff66"];
 // EQ multiplier (0..3, 1=flat) -> dB for live BiquadFilter
 const eqDb=(m: number)=>m<=0?-40:Math.max(-40,Math.min(18,20*Math.log10(m)));
@@ -21,7 +21,10 @@ function drawWf(cv: HTMLCanvasElement|null,buf: AudioBuffer|undefined,sel: {star
 function applyFx(buf: AudioBuffer,fx: any,ctx: AudioContext){const len=buf.length,ch=buf.numberOfChannels,sr=buf.sampleRate,out=ctx.createBuffer(ch,len,sr);for(let c=0;c<ch;c++){const inp=buf.getChannelData(c),o=out.getChannelData(c);for(let j=0;j<len;j++)o[j]=inp[j];if(fx.gain!=null&&fx.gain!==1)for(let j=0;j<len;j++)o[j]*=fx.gain;if(fx.reverse)for(let j=0;j<len/2;j++){const t=o[j];o[j]=o[len-1-j];o[len-1-j]=t;}if(fx.normalize){let m=0;for(let j=0;j<len;j++){const a=Math.abs(o[j]);if(a>m)m=a;}if(m>0){const s=.95/m;for(let j=0;j<len;j++)o[j]*=s;}}if(fx.fadeIn>0){const s=Math.floor(fx.fadeIn*sr);for(let j=0;j<Math.min(s,len);j++)o[j]*=j/s;}if(fx.fadeOut>0){const s=Math.floor(fx.fadeOut*sr);for(let j=0;j<Math.min(s,len);j++)o[len-1-j]*=j/s;}if(fx.lpFreq!=null&&fx.lpFreq<20000){const rc=1/(2*Math.PI*fx.lpFreq),dt=1/sr,a=dt/(rc+dt);let p2=o[0];for(let j=1;j<len;j++){o[j]=p2+a*(o[j]-p2);p2=o[j];}}if(fx.hpFreq!=null&&fx.hpFreq>20){const rc=1/(2*Math.PI*fx.hpFreq),dt=1/sr,a=rc/(rc+dt);let p2=o[0],pi=o[0];for(let j=1;j<len;j++){const v=a*(p2+o[j]-pi);pi=o[j];o[j]=v;p2=v;}}if(fx.saturation>0)for(let j=0;j<len;j++)o[j]=Math.tanh(o[j]*(1+fx.saturation*3))/(1+fx.saturation*.5);if(fx.delay>0){const dt2=Math.floor((fx.delayTime||.25)*sr),fb=fx.delayFb||.4;for(let j=dt2;j<len;j++)o[j]+=o[j-dt2]*fb*fx.delay;}if(fx.compress>0){const th2=1-fx.compress*.7,rat=1+fx.compress*8;for(let j=0;j<len;j++){const a=Math.abs(o[j]);if(a>th2)o[j]*=(th2+(a-th2)/rat)/a;}}
     if(fx.chorus>0){const rate=fx.chorusRate||.5,depth=Math.floor((.003+fx.chorus*.009)*sr),wet=fx.chorus,tmp=new Float32Array(len);for(let j=0;j<len;j++){const lfo=Math.sin(2*Math.PI*rate*j/sr);const di=Math.floor(depth*(lfo*.5+.5));tmp[j]=j-di>=0?o[j-di]:0;}for(let j=0;j<len;j++)o[j]=o[j]*(1-wet*.4)+tmp[j]*wet*.4;}
     if(fx.bitCrush>0){const bits=Math.max(1,Math.round(16-fx.bitCrush*14)),step=2/Math.pow(2,bits);for(let j=0;j<len;j++)o[j]=Math.round(o[j]/step)*step;}
-    if(fx.reverb>0){const wet=fx.reverb,decay=fx.reverbDecay||1.5,dry=new Float32Array(len);for(let j=0;j<len;j++)dry[j]=o[j];const taps=[.023,.031,.041,.053,.067,.083,.1,.13,.17];for(let t=0;t<taps.length;t++){const tapS=Math.floor(taps[t]*sr),g=wet*.28*Math.exp(-taps[t]*2.5/decay);for(let j=tapS;j<len;j++)o[j]+=dry[j-tapS]*g;}}}return out;}
+    if(fx.reverb>0){const wet=fx.reverb,decay=fx.reverbDecay||1.5,dry=new Float32Array(len);for(let j=0;j<len;j++)dry[j]=o[j];const taps=[.023,.031,.041,.053,.067,.083,.1,.13,.17];for(let t=0;t<taps.length;t++){const tapS=Math.floor(taps[t]*sr),g=wet*.28*Math.exp(-taps[t]*2.5/decay);for(let j=tapS;j<len;j++)o[j]+=dry[j-tapS]*g;}}}
+  // Speed resampling (linear interpolation) — must be last as it changes buffer length
+  if(fx.speed&&fx.speed!==1&&fx.speed>0){const spd=Math.max(.1,Math.min(4,fx.speed));const newLen=Math.round(len/spd);const spdBuf=ctx.createBuffer(ch,newLen,sr);for(let c=0;c<ch;c++){const src=out.getChannelData(c),dst=spdBuf.getChannelData(c);for(let i=0;i<newLen;i++){const p=i*spd;const pi=Math.floor(p),frac=p-pi;dst[i]=(src[pi]||0)*(1-frac)+((pi+1<len?src[pi+1]:0)||0)*frac;}}return spdBuf;}
+  return out;}
 
 function trimSil(buf: AudioBuffer,ctx: AudioContext){const d=buf.getChannelData(0);let s=0,e=d.length-1;while(s<d.length&&Math.abs(d[s])<.01)s++;while(e>s&&Math.abs(d[e])<.01)e--;s=Math.max(0,s-80);e=Math.min(d.length-1,e+80);const l=e-s+1,o=ctx.createBuffer(buf.numberOfChannels,l,buf.sampleRate);for(let c=0;c<buf.numberOfChannels;c++){const src=buf.getChannelData(c),dst=o.getChannelData(c);for(let i=0;i<l;i++)dst[i]=src[s+i];}return o;}
 function cropT(buf: AudioBuffer,ss: number,es: number,ctx: AudioContext){const s=Math.max(0,Math.floor(ss*buf.sampleRate)),e=Math.min(buf.length,Math.floor(es*buf.sampleRate)),l=e-s;if(l<=0)return buf;const o=ctx.createBuffer(buf.numberOfChannels,l,buf.sampleRate);for(let c=0;c<buf.numberOfChannels;c++){const src=buf.getChannelData(c),dst=o.getChannelData(c);for(let i=0;i<l;i++)dst[i]=src[s+i];}return o;}
@@ -189,7 +192,7 @@ const KIT_PATTERNS: {s:number,steps:number[],ratchets?:number[],isKick?:boolean,
   ],
 ];
 
-const MKCH=(sc: number)=>({sampleIdx:0,steps:new Array(sc).fill(false),velocities:new Array(sc).fill(80),ratchets:new Array(sc).fill(1),filterAuto:new Array(sc).fill(1),vol:.8,pan:0,pitch:1,mute:false,solo:false,eqL:1,eqM:1,eqH:1,sidechain:false,isKick:false});
+const MKCH=(sc: number)=>({sampleIdx:0,steps:new Array(sc).fill(false),velocities:new Array(sc).fill(80),ratchets:new Array(sc).fill(1),filterAuto:new Array(sc).fill(1),vol:.8,pan:0,pitch:1,mute:false,solo:false,eqL:1,eqM:1,eqH:1,sidechain:false,isKick:false,truncate:false});
 
 const SYSP_CL=`ROLA: AI producent. Slovenčina. STRUČNE - max 2 vety v message.
 FORMÁT: Odpovedaj VÝHRADNE platným JSON bez markdown. Žiadny text pred ani za JSON.
@@ -246,6 +249,15 @@ export default function App(){
   const[masterVol,setMasterVol]=useState(1);
   const[cmdInput,setCmdInput]=useState('');
   const[renameTarget,setRenameTarget]=useState<{idx:number,name:string}|null>(null);
+  const[trackBlocks,setTrackBlocks]=useState<any[]>([]);
+  const[trackPos,setTrackPos]=useState(0);
+  const[trackPlaying,setTrackPlaying]=useState(false);
+  const[trackSel,setTrackSel]=useState<number|null>(null);
+  const[trackBlockFx,setTrackBlockFx]=useState({...FX0});
+  const trackIdR=useRef(0);
+  const trackSrcR=useRef<AudioBufferSourceNode[]>([]);
+  const trackStR=useRef(0);
+  const trackAfR=useRef<number|null>(null);
   const[showClips,setShowClips]=useState(false);
   const[clips,setClips]=useState<any[]>([]);
   const[clipSel,setClipSel]=useState<number|null>(null);
@@ -339,7 +351,10 @@ export default function App(){
       while(nstR.current<ctx.currentTime+.1){const st=csR.current%sc;setCurStep(st);const swOff=st%2===1?(sw-50)/100*stepDur:0;
       for(const ch of chs){if(ch.mute||(solo&&!ch.solo)||!ch.steps[st])continue;const s=smp[ch.sampleIdx];if(!s)continue;
         const ratch=ch.ratchets?.[st]||1;const vel=(ch.velocities?.[st]??80)/127;
-        for(let r=0;r<ratch;r++){const src=ctx.createBufferSource();src.buffer=s.buffer;if(ch.pitch&&ch.pitch!==1)src.playbackRate.value=ch.pitch;
+        for(let r=0;r<ratch;r++){const src=ctx.createBufferSource();
+          // Truncate long samples to step boundary to prevent overlap
+          if(ch.truncate&&s.buffer.duration>stepDur/ratch){const tb=ctx.createBuffer(s.buffer.numberOfChannels,Math.floor(stepDur/ratch*ctx.sampleRate),ctx.sampleRate);for(let c=0;c<tb.numberOfChannels;c++){const d=tb.getChannelData(c),sd=s.buffer.getChannelData(c);for(let i=0;i<tb.length;i++)d[i]=sd[i]||0;}src.buffer=tb;}else{src.buffer=s.buffer;}
+          if(ch.pitch&&ch.pitch!==1)src.playbackRate.value=ch.pitch;
           let node: AudioNode=src;
           if((ch.eqL??1)!==1||(ch.eqM??1)!==1||(ch.eqH??1)!==1){const lo=ctx.createBiquadFilter();lo.type='lowshelf';lo.frequency.value=250;lo.gain.value=eqDb(ch.eqL??1);const md=ctx.createBiquadFilter();md.type='peaking';md.frequency.value=1200;md.Q.value=1;md.gain.value=eqDb(ch.eqM??1);const hi=ctx.createBiquadFilter();hi.type='highshelf';hi.frequency.value=3500;hi.gain.value=eqDb(ch.eqH??1);node.connect(lo);lo.connect(md);md.connect(hi);node=hi;}
           const g=ctx.createGain();g.gain.value=ch.vol*vel/ratch;node.connect(g);if(ch.pan!==0){const pan=ctx.createStereoPanner();pan.pan.value=ch.pan;g.connect(pan);pan.connect(master);}else g.connect(master);src.start(nstR.current+swOff+r*(stepDur/ratch));}}
@@ -355,6 +370,12 @@ export default function App(){
   const previewFx=useCallback(()=>{if(!cur)return;const ctx=getCtx();if(ctx.state==='suspended')ctx.resume();stopSmp();const b=buildFx(cur.buffer);const s=ctx.createBufferSource();s.buffer=b;s.connect(ctx.destination);s.start();srcR.current=s;stR.current=ctx.currentTime;setPlaying(true);const u=()=>{const p=(ctx.currentTime-stR.current)/b.duration;if(p>=1){setPlaying(false);setPlayPos(null);return;}setPlayPos(p);afR.current=requestAnimationFrame(u);};afR.current=requestAnimationFrame(u);s.onended=()=>{setPlaying(false);setPlayPos(null);};},[cur,getCtx,buildFx,stopSmp]);
   const applyFxToSel=useCallback(()=>{if(!cur||sel==null)return;const b=buildFx(cur.buffer);setSamples(p=>p.map((s,i)=>i===sel?{...s,buffer:b,info:analyze(b)}:s));setFx({...FX0});setLog(p=>[...p,`✓ FX aplikované na "${cur.name}" (${ft(b.duration)})`]);},[cur,sel,buildFx]);
   const saveFxAsNew=useCallback(()=>{if(!cur)return;const b=buildFx(cur.buffer);addSample(cur.name+'_fx',b);setFx({...FX0});},[cur,buildFx,addSample]);
+
+  const stopTrack=useCallback(()=>{for(const s of trackSrcR.current)try{s.stop();}catch(e){}trackSrcR.current=[];if(trackAfR.current)cancelAnimationFrame(trackAfR.current);setTrackPlaying(false);},[]);
+  const startTrack=useCallback(()=>{const ctx=getCtx();if(ctx.state==='suspended')ctx.resume();stopTrack();if(!trackBlocks.length)return;if(!masterGR.current){masterGR.current=ctx.createGain();masterGR.current.connect(ctx.destination);}const t0=ctx.currentTime+.05;trackStR.current=t0;const srcs:AudioBufferSourceNode[]=[];for(const bl of trackBlocks){if(bl.mute)continue;const s=ctx.createBufferSource();s.buffer=bl.buffer;const g=ctx.createGain();g.gain.value=bl.vol;s.connect(g);g.connect(masterGR.current!);s.start(t0+bl.startSec);srcs.push(s);}trackSrcR.current=srcs;setTrackPlaying(true);const total=trackBlocks.reduce((mx,b)=>Math.max(mx,b.startSec+b.buffer.duration),0);const anim=()=>{const el=ctx.currentTime-t0;if(el>=total){setTrackPlaying(false);setTrackPos(0);return;}setTrackPos(el);trackAfR.current=requestAnimationFrame(anim);};trackAfR.current=requestAnimationFrame(anim);},[getCtx,stopTrack,trackBlocks]);
+  const addSeqToTrack=useCallback((dir:'h'|'v')=>{const ctx=getCtx();const buf=bouncePat(channels,samples,bpm,stepCount,swing,ctx);const col=SWATCH[trackBlocks.length%SWATCH.length];trackIdR.current++;const endSec=trackBlocks.filter(b=>b.layer===0).reduce((mx,b)=>Math.max(mx,b.startSec+b.buffer.duration),0);const maxLayer=trackBlocks.reduce((mx,b)=>Math.max(mx,b.layer),0);const newBlock={id:trackIdR.current,name:`Pat${curPat}_${bpm}`,buffer:buf,startSec:dir==='h'?endSec:0,layer:dir==='h'?0:maxLayer+1,vol:1,color:col,fx:{...FX0},mute:false};setTrackBlocks(p=>[...p,newBlock]);setLog(p=>[...p,`▸ Sekvencia → Track (${dir==='h'?'za seba':'paralelne'})`]);},[getCtx,channels,samples,bpm,stepCount,swing,curPat,trackBlocks]);
+  const addSampleToTrack=useCallback((si:number,dir:'h'|'v')=>{if(!samples[si])return;trackIdR.current++;const col=samples[si].color||SWATCH[trackBlocks.length%SWATCH.length];const endSec=trackBlocks.filter(b=>b.layer===0).reduce((mx,b)=>Math.max(mx,b.startSec+b.buffer.duration),0);const maxLayer=trackBlocks.reduce((mx,b)=>Math.max(mx,b.layer),0);const newBlock={id:trackIdR.current,name:samples[si].name,buffer:samples[si].buffer,startSec:dir==='h'?endSec:0,layer:dir==='h'?0:maxLayer+1,vol:1,color:col,fx:{...FX0},mute:false};setTrackBlocks(p=>[...p,newBlock]);setLog(p=>[...p,`▸ "${samples[si].name}" → Track`]);},[samples,trackBlocks]);
+  const splitTrackBlock=useCallback((id:number,fracPos:number)=>{const bl=trackBlocks.find(b=>b.id===id);if(!bl)return;const ctx=getCtx();const splitSec=fracPos*bl.buffer.duration;if(splitSec<.1||splitSec>bl.buffer.duration-.1)return;const[a,b2]=splitAt(bl.buffer,splitSec,ctx);trackIdR.current++;const nb={...bl,id:trackIdR.current,buffer:b2,startSec:bl.startSec+splitSec,name:bl.name+'_B'};setTrackBlocks(p=>p.map(x=>x.id===id?{...x,buffer:a,name:x.name+'_A'}:x).concat(nb));},[trackBlocks,getCtx]);
 
   const addCh=(si: number)=>{const c=MKCH(stepCount);c.sampleIdx=si;setChannels((p:any[])=>[...p,c]);};
   const rmCh=(i: number)=>setChannels((p:any[])=>p.filter((_,j)=>j!==i));
@@ -450,7 +471,26 @@ export default function App(){
 
   const onCvD=(e: any)=>{if(!cur)return;if(!cvR.current)return;const r=cvR.current.getBoundingClientRect();sdR.current={s:(e.clientX-r.left)/r.width};setWfSel({start:sdR.current.s,end:sdR.current.s});};
   const onCvM=(e: any)=>{if(!sdR.current)return;if(!cvR.current)return;const r=cvR.current.getBoundingClientRect();const x=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width));setWfSel({start:Math.min(sdR.current.s,x),end:Math.max(sdR.current.s,x)});};
-  const onCvU=()=>{if(sdR.current&&wfSel&&wfSel.end-wfSel.start<.005)setWfSel(null);sdR.current=null;};
+  const onCvU=useCallback(()=>{
+    if(sdR.current&&wfSel){
+      if(wfSel.end-wfSel.start<.005){
+        setWfSel(null);
+        const pos=wfSel.start;
+        if(cur){
+          if(playing){
+            const ctx=getCtx();
+            try{srcR.current?.stop();}catch(e){}
+            if(afR.current)cancelAnimationFrame(afR.current);
+            const s=ctx.createBufferSource();s.buffer=cur.buffer;s.connect(ctx.destination);
+            const off=pos*cur.buffer.duration;s.start(0,off);srcR.current=s;stR.current=ctx.currentTime-off;
+            const u=()=>{const p=(ctx.currentTime-stR.current)/cur.buffer.duration;if(p>=1){setPlaying(false);setPlayPos(null);return;}setPlayPos(p);afR.current=requestAnimationFrame(u);};afR.current=requestAnimationFrame(u);
+            s.onended=()=>{setPlaying(false);setPlayPos(null);};
+          } else {setPlayPos(pos);}
+        }
+      }
+    }
+    sdR.current=null;
+  },[wfSel,playing,cur,getCtx]);
 
   const isTK=mode==='tekno';
 
@@ -506,6 +546,7 @@ export default function App(){
               </div>
               <button onClick={()=>setRenameTarget({idx:i,name:s.name})} style={{background:'none',border:'none',color:th.txD,cursor:'pointer',fontSize:10,padding:'2px 3px',borderRadius:3}} title="Premenovať">✎</button>
               <button onClick={()=>addCh(i)} title="Add to Sequencer" style={{background:'none',border:'none',color:th.ac2,cursor:'pointer',fontSize:10,fontWeight:600,padding:4,borderRadius:3}}>+SEQ</button>
+              <button onClick={()=>addSampleToTrack(i,'h')} title="Pridaj do Tracku (za)" style={{background:'none',border:'none',color:th.ac3,cursor:'pointer',fontSize:10,fontWeight:600,padding:4,borderRadius:3}}>+T</button>
               <button onClick={()=>{setSamples(p=>p.filter((_,j)=>j!==i));if(sel===i)setSel(null);else if(sel!=null&&sel>i)setSel(p=>(p as number)-1);}} style={{background:'none',border:'none',color:th.txD,cursor:'pointer',fontSize:12,padding:4,borderRadius:3}}>x</button>
             </div>
           ))}
@@ -536,7 +577,7 @@ export default function App(){
 
         {/* Tabs */}
         <div style={{display:'flex',borderBottom:`1px solid ${th.bd}`,flexShrink:0,background:th.bgP}}>
-          {[['seq','SEQUENCER'],['fx','FX EDITOR'],['mix','MIXER'],['chat','AI ASSISTANT'],['log','LOGS']].map(([k,l])=>(
+          {[['seq','SEQUENCER'],['track','TRACK'],['fx','FX EDITOR'],['mix','MIXER'],['chat','AI ASSISTANT'],['log','LOGS']].map(([k,l])=>(
             <button key={k} onClick={()=>setPanel(k)} style={{padding:'8px 16px',fontSize:11,fontWeight:panel===k?700:600,letterSpacing:1,cursor:'pointer',background:panel===k?th.bgL:'transparent',color:panel===k?th.ac:th.txD,border:'none',borderBottom:panel===k?`2px solid ${th.ac}`:'2px solid transparent',fontFamily:'inherit',transition:'all 0.1s'}}>{l}</button>
           ))}
         </div>
@@ -558,6 +599,9 @@ export default function App(){
                 {samples.map((s,i)=><option key={i} value={i}>{s.name}</option>)}
               </select>
               <button onClick={()=>{if(samples.length)addCh(addSel);}} disabled={!samples.length} style={{...b1(true,null,th),fontSize:11,padding:'4px 12px',fontWeight:700}} title="Pridať vybraný zvuk ako novú stopu">Pridať stopu</button>
+              <div style={{width:1,height:20,background:th.bd}}/>
+              <button onClick={()=>addSeqToTrack('h')} disabled={!channels.length} style={{...sb(false,th.ac3,th),fontSize:10,padding:'3px 10px'}} title="Bounce + pridaj za Track">SEQ→Track</button>
+              <button onClick={()=>addSeqToTrack('v')} disabled={!channels.length} style={{...sb(false,th.ac3,th),fontSize:10,padding:'3px 10px'}} title="Bounce + pridaj paralelne k Tracku">SEQ↕Track</button>
             </div>
 
             {/* SEQ Overview waveform */}
@@ -665,6 +709,7 @@ export default function App(){
                         <input type="range" min={0} max={1.5} step={.01} value={ch.vol} onChange={e=>updCh(ci,'vol',+e.target.value)} style={{flex:1,height:5,accentColor:col}} title="Hlasitosť"/>
                         <button onClick={()=>updCh(ci,'mute',!ch.mute)} style={{...sb(ch.mute,th.red,th),fontSize:9,padding:'1px 5px'}}>M</button>
                         <button onClick={()=>updCh(ci,'solo',!ch.solo)} style={{...sb(ch.solo,th.ac2,th),fontSize:9,padding:'1px 5px'}}>S</button>
+                        <button onClick={()=>updCh(ci,'truncate',!ch.truncate)} style={{...sb(ch.truncate,th.ac3,th),fontSize:9,padding:'1px 5px'}} title="Orezať zvuk na dĺžku stepu (zabraňuje prekrývaniu dlhých zvukov)">✂</button>
                       </div>
                       {isTK&&<div style={{display:'flex',gap:3}}>
                         <button onClick={()=>updCh(ci,'isKick',!ch.isKick)} style={{...sb(ch.isKick,th.ac3,th),fontSize:8,padding:'1px 5px',flex:1}} title="Kick (zdroj sidechain)">KICK</button>
@@ -712,6 +757,102 @@ export default function App(){
           </div>
         )}
 
+        {/* TRACK VIEW */}
+        {panel==='track'&&(()=>{
+          const totalDur=trackBlocks.reduce((mx,b)=>Math.max(mx,b.startSec+b.buffer.duration),0);
+          const LANE_H=56;
+          const maxLayer=trackBlocks.reduce((mx,b)=>Math.max(mx,b.layer),0);
+          const selBlock=trackBlocks.find(b=>b.id===trackSel)||null;
+          return(
+          <div style={{flex:1,overflow:'auto',padding:8,background:th.bg}}>
+            {/* Transport */}
+            <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8,padding:'6px 10px',background:th.bgD,borderRadius:6,border:`1px solid ${th.bd}`,flexWrap:'wrap'}}>
+              <button style={{...sb(trackPlaying,th.ac2,th),padding:'4px 14px',fontWeight:700}} onClick={trackPlaying?stopTrack:startTrack}>{trackPlaying?'⏹ Stop':'▶ Play Track'}</button>
+              <span style={{fontSize:11,color:th.txD,fontFamily:'monospace'}}>{ft(trackPos)} / {ft(totalDur)}</span>
+              <div style={{flex:1}}/>
+              <button style={{...sb(false,th.ac3,th),padding:'3px 10px',fontSize:10}} onClick={()=>addSeqToTrack('h')} disabled={!channels.length} title="Bounce aktívnu sekvenciu a pridaj za Track">+ SEQ za →</button>
+              <button style={{...sb(false,th.ac3,th),padding:'3px 10px',fontSize:10}} onClick={()=>addSeqToTrack('v')} disabled={!channels.length} title="Bounce aktívnu sekvenciu a pridaj paralelne">+ SEQ ↕ paralelne</button>
+              {trackBlocks.length>0&&<button style={{...sb(false,th.red,th),padding:'3px 10px',fontSize:10}} onClick={()=>{stopTrack();setTrackBlocks([]);setTrackSel(null);}}>Vyčistiť Track</button>}
+            </div>
+            {/* Timeline */}
+            {!trackBlocks.length&&<div style={{textAlign:'center',color:th.txD,padding:40,fontSize:12,lineHeight:1.8}}>
+              Track je prázdny.<br/>
+              Pridaj sekvenciu cez <b>+ SEQ za →</b> (za seba) alebo <b>+ SEQ ↕</b> (paralelne).<br/>
+              Alebo klikni <b>+T</b> pri vzorke v knižnici (vľavo).
+            </div>}
+            {trackBlocks.length>0&&<div style={{position:'relative',background:th.bgD,borderRadius:6,border:`1px solid ${th.bd}`,overflow:'hidden',minHeight:(maxLayer+1)*LANE_H+24}}>
+              {/* Time ruler */}
+              <div style={{height:20,display:'flex',borderBottom:`1px solid ${th.bd}`,position:'relative'}}>
+                {Array.from({length:Math.ceil(totalDur)+1},(_,i)=>(
+                  <div key={i} style={{position:'absolute',left:`${(i/totalDur)*100}%`,top:0,height:'100%',borderLeft:`1px solid ${th.bd}`,paddingLeft:3}}>
+                    <span style={{fontSize:8,color:th.txD,fontFamily:'monospace'}}>{ft(i)}</span>
+                  </div>
+                ))}
+              </div>
+              {/* Layer labels */}
+              {Array.from({length:maxLayer+1},(_,li)=>(
+                <div key={li} style={{position:'absolute',left:0,top:20+li*LANE_H,height:LANE_H,width:48,borderRight:`1px solid ${th.bd}`,display:'flex',alignItems:'center',justifyContent:'center',background:th.bgP,zIndex:1}}>
+                  <span style={{fontSize:9,color:th.txD,fontWeight:700,writingMode:'horizontal-tb'}}>{li===0?'MAIN':`L${li}`}</span>
+                </div>
+              ))}
+              {/* Playhead */}
+              {totalDur>0&&<div style={{position:'absolute',top:0,bottom:0,left:`calc(48px + ${(trackPos/totalDur)*(100)}% * (1 - 48/${Math.max(800,totalDur*80)}))`,width:2,background:'rgba(255,255,255,0.9)',zIndex:10,pointerEvents:'none',boxShadow:'0 0 8px #fff'}}/>}
+              {/* Blocks */}
+              {trackBlocks.map(bl=>{
+                const left=totalDur>0?(bl.startSec/totalDur*100):0;
+                const width=totalDur>0?(bl.buffer.duration/totalDur*100):10;
+                const top=20+bl.layer*LANE_H;
+                const isSel=trackSel===bl.id;
+                return(
+                <div key={bl.id} onClick={()=>{setTrackSel(isSel?null:bl.id);if(!isSel)setTrackBlockFx({...bl.fx});}}
+                  style={{position:'absolute',left:`calc(48px + ${left}% * (1 - 48px/100%))`,width:`max(40px, ${width}%)`,top:top+2,height:LANE_H-4,
+                    background:bl.color+(isSel?'55':'33'),border:`1.5px solid ${isSel?'#fff':bl.color}`,borderRadius:4,cursor:'pointer',overflow:'hidden',
+                    opacity:bl.mute?.4:1,transition:'border .1s',zIndex:isSel?3:2}}>
+                  <div style={{padding:'2px 5px',display:'flex',alignItems:'center',gap:4}}>
+                    <span style={{fontSize:9,fontWeight:700,color:bl.color,flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{bl.name}</span>
+                    <span style={{fontSize:8,color:'rgba(255,255,255,.5)'}}>{ft(bl.buffer.duration)}</span>
+                  </div>
+                  {/* Mini waveform indicator (bars) */}
+                  <div style={{position:'absolute',bottom:0,left:0,right:0,height:24,display:'flex',alignItems:'flex-end',gap:.5,padding:'0 2px',opacity:.6}}>
+                    {Array.from({length:32},(_,i)=>{const ch=bl.buffer.getChannelData(0);const step=Math.floor(ch.length/32);let mx=0;for(let j=0;j<step;j++){const v=Math.abs(ch[i*step+j]||0);if(v>mx)mx=v;}return(<div key={i} style={{flex:1,background:bl.color,borderRadius:1,height:`${mx*100}%`,minHeight:1}}/>);})}
+                  </div>
+                </div>);
+              })}
+            </div>}
+            {/* Selected block controls */}
+            {selBlock&&<div style={{marginTop:8,background:th.bgD,borderRadius:6,border:`1px solid ${selBlock.color}`,padding:10}}>
+              <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8,flexWrap:'wrap'}}>
+                <span style={{fontSize:12,fontWeight:700,color:selBlock.color,flex:1}}>{selBlock.name}</span>
+                <span style={{fontSize:10,color:th.txD}}>{ft(selBlock.buffer.duration)}</span>
+                <button style={{...sb(false,th.ac2,th),fontSize:10,padding:'3px 10px'}} onClick={()=>{const ctx=getCtx();if(ctx.state==='suspended')ctx.resume();const s=ctx.createBufferSource();s.buffer=selBlock.buffer;if(!masterGR.current){masterGR.current=ctx.createGain();masterGR.current.connect(ctx.destination);}const g=ctx.createGain();g.gain.value=selBlock.vol;s.connect(g);g.connect(masterGR.current);s.start();}}>▶ Prehrať</button>
+                <button style={{...sb(selBlock.mute,th.red,th),fontSize:10,padding:'3px 10px'}} onClick={()=>setTrackBlocks(p=>p.map(b=>b.id===trackSel?{...b,mute:!b.mute}:b))}>{selBlock.mute?'Unmute':'Mute'}</button>
+                <button style={{...sb(false,th.ac3,th),fontSize:10,padding:'3px 10px'}} onClick={()=>{trackIdR.current++;setTrackBlocks(p=>[...p,{...selBlock,id:trackIdR.current,name:selBlock.name+'_dup',startSec:selBlock.startSec+selBlock.buffer.duration}]);}}>Duplikovať</button>
+                <button style={{...sb(false,null,th),fontSize:10,padding:'3px 10px'}} onClick={()=>splitTrackBlock(trackSel!,.5)}>Rozdeliť na ½</button>
+                <button style={{background:'none',border:`1px solid ${th.red}`,color:th.red,borderRadius:3,fontSize:10,padding:'3px 10px',cursor:'pointer'}} onClick={()=>{setTrackBlocks(p=>p.filter(b=>b.id!==trackSel));setTrackSel(null);}}>Odstrániť</button>
+              </div>
+              <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center',marginBottom:8}}>
+                <div style={{flex:1,minWidth:150}}>
+                  <div style={{fontSize:9,color:th.txD,marginBottom:2}}>Hlasitosť: {(selBlock.vol*100).toFixed(0)}%</div>
+                  <input type="range" min={0} max={1.5} step={.01} value={selBlock.vol} onChange={e=>setTrackBlocks(p=>p.map(b=>b.id===trackSel?{...b,vol:+e.target.value}:b))} style={{width:'100%',accentColor:selBlock.color}}/>
+                </div>
+                <div style={{flex:1,minWidth:150}}>
+                  <div style={{fontSize:9,color:th.txD,marginBottom:2}}>Rýchlosť: {(trackBlockFx.speed||1).toFixed(2)}×</div>
+                  <input type="range" min={.25} max={4} step={.01} value={trackBlockFx.speed||1} onChange={e=>{const v=+e.target.value;setTrackBlockFx(f=>({...f,speed:v}));}} style={{width:'100%',accentColor:selBlock.color}}/>
+                </div>
+                <button style={{...sb(false,th.ac2,th),padding:'4px 12px',fontSize:10}} onClick={()=>{const ctx=getCtx();let buf=selBlock.buffer;const nfx={...trackBlockFx};if(JSON.stringify(nfx)!==JSON.stringify(FX0)){buf=applyFx(buf,nfx,ctx);if(nfx.loop>1)buf=mkLoop(buf,nfx.loop,.02,ctx);}setTrackBlocks(p=>p.map(b=>b.id===trackSel?{...b,buffer:buf,fx:{...nfx}}:b));setLog(p=>[...p,`▸ FX aplikované na Track blok "${selBlock.name}"`]);}}>Použiť FX</button>
+              </div>
+              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(140px,1fr))',gap:6}}>
+                {([['Skreslenie',(trackBlockFx.saturation*100).toFixed(0)+'%','saturation',0,1,.01],['Reverb',(trackBlockFx.reverb*100).toFixed(0)+'%','reverb',0,1,.01],['Chorus',(trackBlockFx.chorus*100).toFixed(0)+'%','chorus',0,1,.01],['Bitcrusher',(trackBlockFx.bitCrush*100).toFixed(0)+'%','bitCrush',0,1,.01],['Filter LP',trackBlockFx.lpFreq>=20000?'OFF':(trackBlockFx.lpFreq/1000).toFixed(1)+'k','lpFreq',200,20000,100],['Delay',(trackBlockFx.delay*100).toFixed(0)+'%','delay',0,1,.01]] as [string,string,string,number,number,number][]).map(([lbl,val,key,mn,mx,st])=>(
+                  <div key={key} style={{background:th.bgP,border:`1px solid ${th.bd}`,borderRadius:4,padding:'5px 8px'}}>
+                    <div style={{display:'flex',justifyContent:'space-between',marginBottom:3}}><span style={{fontSize:9,color:th.txD}}>{lbl}</span><span style={{fontSize:10,color:selBlock.color,fontWeight:700}}>{val}</span></div>
+                    <input type="range" min={mn} max={mx} step={st} value={(trackBlockFx as any)[key]} onChange={e=>setTrackBlockFx(f=>({...f,[key]:+e.target.value}))} style={{width:'100%',accentColor:selBlock.color}}/>
+                  </div>
+                ))}
+              </div>
+            </div>}
+          </div>);
+        })()}
+
         {/* FX EDITOR — manual editing of the selected sample */}
         {panel==='fx'&&(
           <div style={{flex:1,overflow:'auto',padding:16,background:th.bg}}>
@@ -738,6 +879,7 @@ export default function App(){
                   ['Chorus',(fx.chorus*100).toFixed(0)+'%','chorus',0,1,.01],
                   ['Chorus rýchlosť',fx.chorusRate.toFixed(1)+'Hz','chorusRate',.1,5,.1],
                   ['Bitcrusher',(fx.bitCrush*100).toFixed(0)+'%','bitCrush',0,1,.01],
+                  ['Rýchlosť (Speed)',fx.speed.toFixed(2)+'×','speed',.25,4,.01],
                 ] as [string,string,keyof typeof fx,number,number,number][]).map(([label,val,key,min,max,step])=>(
                   <div key={key} style={{background:th.bgD,border:`1px solid ${th.bd}`,borderRadius:6,padding:'8px 10px'}}>
                     <div style={{display:'flex',justifyContent:'space-between',marginBottom:6}}>
