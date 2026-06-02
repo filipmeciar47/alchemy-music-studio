@@ -254,6 +254,8 @@ export default function App(){
   const[trackPlaying,setTrackPlaying]=useState(false);
   const[trackSel,setTrackSel]=useState<number|null>(null);
   const[trackBlockFx,setTrackBlockFx]=useState({...FX0});
+  const[activeLayer,setActiveLayer]=useState(0);
+  const[layerVols,setLayerVols]=useState<{[k:number]:number}>({0:1});
   const trackIdR=useRef(0);
   const trackSrcR=useRef<AudioBufferSourceNode[]>([]);
   const trackStR=useRef(0);
@@ -373,8 +375,10 @@ export default function App(){
 
   const stopTrack=useCallback(()=>{for(const s of trackSrcR.current)try{s.stop();}catch(e){}trackSrcR.current=[];if(trackAfR.current)cancelAnimationFrame(trackAfR.current);setTrackPlaying(false);},[]);
   const startTrack=useCallback(()=>{const ctx=getCtx();if(ctx.state==='suspended')ctx.resume();stopTrack();if(!trackBlocks.length)return;if(!masterGR.current){masterGR.current=ctx.createGain();masterGR.current.connect(ctx.destination);}const t0=ctx.currentTime+.05;trackStR.current=t0;const srcs:AudioBufferSourceNode[]=[];for(const bl of trackBlocks){if(bl.mute)continue;const s=ctx.createBufferSource();s.buffer=bl.buffer;const g=ctx.createGain();g.gain.value=bl.vol;s.connect(g);g.connect(masterGR.current!);s.start(t0+bl.startSec);srcs.push(s);}trackSrcR.current=srcs;setTrackPlaying(true);const total=trackBlocks.reduce((mx,b)=>Math.max(mx,b.startSec+b.buffer.duration),0);const anim=()=>{const el=ctx.currentTime-t0;if(el>=total){setTrackPlaying(false);setTrackPos(0);return;}setTrackPos(el);trackAfR.current=requestAnimationFrame(anim);};trackAfR.current=requestAnimationFrame(anim);},[getCtx,stopTrack,trackBlocks]);
-  const addSeqToTrack=useCallback((dir:'h'|'v')=>{const ctx=getCtx();const buf=bouncePat(channels,samples,bpm,stepCount,swing,ctx);const col=SWATCH[trackBlocks.length%SWATCH.length];trackIdR.current++;const endSec=trackBlocks.filter(b=>b.layer===0).reduce((mx,b)=>Math.max(mx,b.startSec+b.buffer.duration),0);const maxLayer=trackBlocks.reduce((mx,b)=>Math.max(mx,b.layer),0);const newBlock={id:trackIdR.current,name:`Pat${curPat}_${bpm}`,buffer:buf,startSec:dir==='h'?endSec:0,layer:dir==='h'?0:maxLayer+1,vol:1,color:col,fx:{...FX0},mute:false};setTrackBlocks(p=>[...p,newBlock]);setLog(p=>[...p,`▸ Sekvencia → Track (${dir==='h'?'za seba':'paralelne'})`]);},[getCtx,channels,samples,bpm,stepCount,swing,curPat,trackBlocks]);
-  const addSampleToTrack=useCallback((si:number,dir:'h'|'v')=>{if(!samples[si])return;trackIdR.current++;const col=samples[si].color||SWATCH[trackBlocks.length%SWATCH.length];const endSec=trackBlocks.filter(b=>b.layer===0).reduce((mx,b)=>Math.max(mx,b.startSec+b.buffer.duration),0);const maxLayer=trackBlocks.reduce((mx,b)=>Math.max(mx,b.layer),0);const newBlock={id:trackIdR.current,name:samples[si].name,buffer:samples[si].buffer,startSec:dir==='h'?endSec:0,layer:dir==='h'?0:maxLayer+1,vol:1,color:col,fx:{...FX0},mute:false};setTrackBlocks(p=>[...p,newBlock]);setLog(p=>[...p,`▸ "${samples[si].name}" → Track`]);},[samples,trackBlocks]);
+  const addSeqToTrack=useCallback((dir:'h'|'v')=>{const ctx=getCtx();const buf=bouncePat(channels,samples,bpm,stepCount,swing,ctx);const col=SWATCH[trackBlocks.length%SWATCH.length];trackIdR.current++;const targetLayer=dir==='h'?activeLayer:trackBlocks.reduce((mx,b)=>Math.max(mx,b.layer),0)+1;const endSec=trackBlocks.filter(b=>b.layer===targetLayer).reduce((mx,b)=>Math.max(mx,b.startSec+b.buffer.duration),0);const newBlock={id:trackIdR.current,name:`Pat${curPat}_${bpm}`,buffer:buf,startSec:dir==='h'?endSec:0,layer:targetLayer,vol:1,color:col,fx:{...FX0},mute:false};setTrackBlocks(p=>[...p,newBlock]);if(dir==='v')setLayerVols(lv=>({...lv,[targetLayer]:1}));setLog(p=>[...p,`▸ Sekvencia → ${dir==='h'?`Track ${targetLayer} (za seba)`:'nový paralelný track'}`]);},[getCtx,channels,samples,bpm,stepCount,swing,curPat,trackBlocks,activeLayer]);
+  const addSampleToTrack=useCallback((si:number,dir:'h'|'v')=>{if(!samples[si])return;trackIdR.current++;const col=samples[si].color||SWATCH[trackBlocks.length%SWATCH.length];const targetLayer=dir==='h'?activeLayer:trackBlocks.reduce((mx,b)=>Math.max(mx,b.layer),0)+1;const endSec=trackBlocks.filter(b=>b.layer===targetLayer).reduce((mx,b)=>Math.max(mx,b.startSec+b.buffer.duration),0);const newBlock={id:trackIdR.current,name:samples[si].name,buffer:samples[si].buffer,startSec:dir==='h'?endSec:0,layer:targetLayer,vol:1,color:col,fx:{...FX0},mute:false};setTrackBlocks(p=>[...p,newBlock]);if(dir==='v')setLayerVols(lv=>({...lv,[targetLayer]:1}));setLog(p=>[...p,`▸ "${samples[si].name}" → Track`]);},[samples,trackBlocks,activeLayer]);
+  const bakeLayerIntoMain=useCallback((layer:number)=>{if(layer===0)return;const ctx=getCtx();const lbs=trackBlocks.filter(b=>b.layer===layer);if(!lbs.length)return;const sr=44100;const startSec=Math.min(...lbs.map(b=>b.startSec));const endSec=Math.max(...lbs.map(b=>b.startSec+b.buffer.duration));const len=Math.ceil((endSec-startSec)*sr);const out=ctx.createBuffer(2,len,sr);const oL=out.getChannelData(0),oR=out.getChannelData(1);for(const bl of lbs){const off=Math.floor((bl.startSec-startSec)*sr);const ch0=bl.buffer.getChannelData(0),ch1=bl.buffer.numberOfChannels>1?bl.buffer.getChannelData(1):ch0;for(let i=0;i<bl.buffer.length&&off+i<len;i++){oL[off+i]+=ch0[i]*(layerVols[layer]??1)*bl.vol;oR[off+i]+=ch1[i]*(layerVols[layer]??1)*bl.vol;}}let pk=0;for(let i=0;i<len;i++)pk=Math.max(pk,Math.abs(oL[i]),Math.abs(oR[i]));if(pk>0.98){const g=0.98/pk;for(let i=0;i<len;i++){oL[i]*=g;oR[i]*=g;}}trackIdR.current++;const nb={id:trackIdR.current,name:`Track${layer}_do_main`,buffer:out,startSec,layer:0,vol:1,color:SWATCH[layer%SWATCH.length],fx:{...FX0},mute:false};setTrackBlocks(p=>[...p.filter(b=>b.layer!==layer),nb]);setLayerVols(lv=>{const n={...lv};delete n[layer];return n;});setLog(p=>[...p,`▸ Track ${layer} zakomponovaný do MAIN`]);},[trackBlocks,getCtx,layerVols]);
+  const renderBlockWithOverlap=useCallback((id:number)=>{const bl=trackBlocks.find(b=>b.id===id);if(!bl)return null;const ctx=getCtx();const sr=44100;const s0=bl.startSec,s1=bl.startSec+bl.buffer.duration,dur=s1-s0;const len=Math.ceil(dur*sr);const out=ctx.createBuffer(2,len,sr);const oL=out.getChannelData(0),oR=out.getChannelData(1);for(const b of trackBlocks){if(b.mute)continue;const bE=b.startSec+b.buffer.duration;if(bE<=s0||b.startSec>=s1)continue;const oS=Math.max(b.startSec,s0),oE=Math.min(bE,s1);const srcOff=Math.floor((oS-b.startSec)*sr),dstOff=Math.floor((oS-s0)*sr),olen=Math.floor((oE-oS)*sr);const ch0=b.buffer.getChannelData(0),ch1=b.buffer.numberOfChannels>1?b.buffer.getChannelData(1):ch0;for(let i=0;i<olen;i++){oL[dstOff+i]+=(ch0[srcOff+i]||0)*(layerVols[b.layer]??1)*b.vol;oR[dstOff+i]+=(ch1[srcOff+i]||0)*(layerVols[b.layer]??1)*b.vol;}}let pk=0;for(let i=0;i<len;i++)pk=Math.max(pk,Math.abs(oL[i]),Math.abs(oR[i]));if(pk>0.98){const g=0.98/pk;for(let i=0;i<len;i++){oL[i]*=g;oR[i]*=g;}}return out;},[trackBlocks,getCtx,layerVols]);
   const splitTrackBlock=useCallback((id:number,fracPos:number)=>{const bl=trackBlocks.find(b=>b.id===id);if(!bl)return;const ctx=getCtx();const splitSec=fracPos*bl.buffer.duration;if(splitSec<.1||splitSec>bl.buffer.duration-.1)return;const[a,b2]=splitAt(bl.buffer,splitSec,ctx);trackIdR.current++;const nb={...bl,id:trackIdR.current,buffer:b2,startSec:bl.startSec+splitSec,name:bl.name+'_B'};setTrackBlocks(p=>p.map(x=>x.id===id?{...x,buffer:a,name:x.name+'_A'}:x).concat(nb));},[trackBlocks,getCtx]);
   const bounceTrack=useCallback(()=>{if(!trackBlocks.length)return null;const ctx=getCtx();const sr=44100;const totalDur=trackBlocks.reduce((mx,b)=>Math.max(mx,b.startSec+b.buffer.duration),0);const totalLen=Math.ceil(totalDur*sr);const out=ctx.createBuffer(2,totalLen,sr);const oL=out.getChannelData(0),oR=out.getChannelData(1);for(const bl of trackBlocks){if(bl.mute)continue;const buf=bl.buffer;const startS=Math.floor(bl.startSec*sr);const ch0=buf.getChannelData(0),ch1=buf.numberOfChannels>1?buf.getChannelData(1):ch0;for(let i=0;i<buf.length&&startS+i<totalLen;i++){oL[startS+i]+=ch0[i]*bl.vol;oR[startS+i]+=ch1[i]*bl.vol;}}let pk=0;for(let i=0;i<totalLen;i++){const a=Math.max(Math.abs(oL[i]),Math.abs(oR[i]));if(a>pk)pk=a;}if(pk>0.98){const g=0.98/pk;for(let i=0;i<totalLen;i++){oL[i]*=g;oR[i]*=g;}}return out;},[trackBlocks,getCtx]);
 
@@ -761,93 +765,117 @@ export default function App(){
         {/* TRACK VIEW */}
         {panel==='track'&&(()=>{
           const totalDur=trackBlocks.reduce((mx,b)=>Math.max(mx,b.startSec+b.buffer.duration),0);
-          const LANE_H=56;
-          const maxLayer=trackBlocks.reduce((mx,b)=>Math.max(mx,b.layer),0);
+          const LANE_H=60;const LBL_W=88;const MAX_VIS=3;
+          const layers=[...new Set(trackBlocks.map(b=>b.layer))].sort((a,b)=>a-b);
           const selBlock=trackBlocks.find(b=>b.id===trackSel)||null;
+          const layerColor=(l:number)=>SWATCH[(l*3)%SWATCH.length];
           return(
-          <div style={{flex:1,overflow:'auto',padding:8,background:th.bg}}>
-            {/* Transport */}
-            <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8,padding:'6px 10px',background:th.bgD,borderRadius:6,border:`1px solid ${th.bd}`,flexWrap:'wrap'}}>
-              <button style={{...sb(trackPlaying,th.ac2,th),padding:'4px 14px',fontWeight:700}} onClick={trackPlaying?stopTrack:startTrack}>{trackPlaying?'⏹ Stop':'▶ Play Track'}</button>
-              <span style={{fontSize:11,color:th.txD,fontFamily:'monospace'}}>{ft(trackPos)} / {ft(totalDur)}</span>
+          <div style={{flex:1,overflow:'auto',padding:8,background:th.bg,display:'flex',flexDirection:'column',gap:6}}>
+            {/* Transport — stays at top */}
+            <div style={{display:'flex',alignItems:'center',gap:6,padding:'6px 10px',background:th.bgD,borderRadius:6,border:`1px solid ${th.bd}`,flexWrap:'wrap',flexShrink:0}}>
+              <button style={{...sb(trackPlaying,th.ac2,th),padding:'4px 14px',fontWeight:700}} onClick={trackPlaying?stopTrack:startTrack}>{trackPlaying?'⏹ Stop':'▶ Play'}</button>
+              <span style={{fontSize:11,color:th.txD,fontFamily:'monospace'}}>{ft(trackPos)}{totalDur>0?' / '+ft(totalDur):''}</span>
+              <span style={{fontSize:10,color:activeLayer===0?th.ac:layerColor(activeLayer),fontWeight:700}}>Aktívny: {activeLayer===0?'MAIN':`Track ${activeLayer}`}</span>
               <div style={{flex:1}}/>
-              <button style={{...sb(false,th.ac3,th),padding:'3px 10px',fontSize:10}} onClick={()=>addSeqToTrack('h')} disabled={!channels.length} title="Bounce aktívnu sekvenciu a pridaj za Track">+ SEQ za →</button>
-              <button style={{...sb(false,th.ac3,th),padding:'3px 10px',fontSize:10}} onClick={()=>addSeqToTrack('v')} disabled={!channels.length} title="Bounce aktívnu sekvenciu a pridaj paralelne">+ SEQ ↕ paralelne</button>
-              {trackBlocks.length>0&&<button style={{...sb(false,th.ac2,th),padding:'3px 10px',fontSize:10}} onClick={()=>{const buf=bounceTrack();if(!buf)return;addSample('Track_'+Date.now()%10000,buf);setPanel('seq');setLog(p=>[...p,'✓ Track → Library']);}} title="Render celého tracku a pridaj do Library ako vzorku">Track → Library</button>}
-              {trackBlocks.length>0&&<button style={{...sb(false,null,th),padding:'3px 10px',fontSize:10}} onClick={()=>{const buf=bounceTrack();if(!buf)return;doExport(buf,'Track_'+Date.now()%10000);}} title="Exportuj celý track ako WAV">Export WAV</button>}
-              {trackBlocks.length>0&&<button style={{...sb(false,th.red,th),padding:'3px 10px',fontSize:10}} onClick={()=>{stopTrack();setTrackBlocks([]);setTrackSel(null);}}>Vyčistiť Track</button>}
+              <button style={{...sb(false,th.ac3,th),padding:'3px 9px',fontSize:10}} onClick={()=>addSeqToTrack('h')} disabled={!channels.length} title={`Pridaj bounced SEQ za aktívny ${activeLayer===0?'MAIN':'Track '+activeLayer}`}>+ SEQ →</button>
+              <button style={{...sb(false,th.ac3,th),padding:'3px 9px',fontSize:10}} onClick={()=>addSeqToTrack('v')} disabled={!channels.length} title="Pridaj bounced SEQ ako nový paralelný track">+ SEQ ↕</button>
+              {trackBlocks.length>0&&<button style={{...sb(false,th.ac2,th),padding:'3px 9px',fontSize:10}} onClick={()=>{const buf=bounceTrack();if(!buf)return;addSample('Track_'+Date.now()%10000,buf);setPanel('seq');setLog(p=>[...p,'✓ Track → Library']);}}>Track → Library</button>}
+              {trackBlocks.length>0&&<button style={{...sb(false,null,th),padding:'3px 9px',fontSize:10}} onClick={()=>{const buf=bounceTrack();if(!buf)return;doExport(buf,'Track_'+Date.now()%10000);}}>Export WAV</button>}
+              {trackBlocks.length>0&&<button style={{...sb(false,th.red,th),padding:'3px 9px',fontSize:10}} onClick={()=>{stopTrack();setTrackBlocks([]);setTrackSel(null);setActiveLayer(0);setLayerVols({0:1});}}>Vyčistiť</button>}
             </div>
-            {/* Timeline */}
+
             {!trackBlocks.length&&<div style={{textAlign:'center',color:th.txD,padding:40,fontSize:12,lineHeight:1.8}}>
-              Track je prázdny.<br/>
-              Pridaj sekvenciu cez <b>+ SEQ za →</b> (za seba) alebo <b>+ SEQ ↕</b> (paralelne).<br/>
-              Alebo klikni <b>+T</b> pri vzorke v knižnici (vľavo).
+              Track je prázdny. Pridaj sekvenciu cez <b>+ SEQ →</b> (za seba do aktívneho tracku) alebo <b>+ SEQ ↕</b> (nový paralelný track).<br/>
+              Alebo klikni <b>+T</b> pri vzorke v knižnici vľavo.
             </div>}
-            {trackBlocks.length>0&&<div style={{position:'relative',background:th.bgD,borderRadius:6,border:`1px solid ${th.bd}`,overflow:'hidden',minHeight:(maxLayer+1)*LANE_H+24}}>
-              {/* Time ruler */}
-              <div style={{height:20,display:'flex',borderBottom:`1px solid ${th.bd}`,position:'relative'}}>
-                {Array.from({length:Math.ceil(totalDur)+1},(_,i)=>(
-                  <div key={i} style={{position:'absolute',left:`${(i/totalDur)*100}%`,top:0,height:'100%',borderLeft:`1px solid ${th.bd}`,paddingLeft:3}}>
+
+            {/* Time ruler (sticky) */}
+            {trackBlocks.length>0&&<div style={{display:'flex',background:th.bgP,borderRadius:4,border:`1px solid ${th.bd}`,flexShrink:0,overflow:'hidden'}}>
+              <div style={{width:LBL_W,flexShrink:0,borderRight:`1px solid ${th.bd}`}}/>
+              <div style={{flex:1,height:18,position:'relative'}}>
+                {totalDur>0&&Array.from({length:Math.min(20,Math.ceil(totalDur)+1)},(_,i)=>(
+                  <div key={i} style={{position:'absolute',left:`${(i/totalDur)*100}%`,top:0,height:'100%',borderLeft:`1px solid ${th.bd}33`,paddingLeft:2}}>
                     <span style={{fontSize:8,color:th.txD,fontFamily:'monospace'}}>{ft(i)}</span>
                   </div>
                 ))}
               </div>
-              {/* Layer labels */}
-              {Array.from({length:maxLayer+1},(_,li)=>(
-                <div key={li} style={{position:'absolute',left:0,top:20+li*LANE_H,height:LANE_H,width:48,borderRight:`1px solid ${th.bd}`,display:'flex',alignItems:'center',justifyContent:'center',background:th.bgP,zIndex:1}}>
-                  <span style={{fontSize:9,color:th.txD,fontWeight:700,writingMode:'horizontal-tb'}}>{li===0?'MAIN':`L${li}`}</span>
-                </div>
-              ))}
-              {/* Playhead */}
-              {totalDur>0&&<div style={{position:'absolute',top:0,bottom:0,left:`calc(48px + ${(trackPos/totalDur)*(100)}% * (1 - 48/${Math.max(800,totalDur*80)}))`,width:2,background:'rgba(255,255,255,0.9)',zIndex:10,pointerEvents:'none',boxShadow:'0 0 8px #fff'}}/>}
-              {/* Blocks */}
-              {trackBlocks.map(bl=>{
-                const left=totalDur>0?(bl.startSec/totalDur*100):0;
-                const width=totalDur>0?(bl.buffer.duration/totalDur*100):10;
-                const top=20+bl.layer*LANE_H;
-                const isSel=trackSel===bl.id;
+            </div>}
+
+            {/* Track rows — scrollable if > MAX_VIS */}
+            {trackBlocks.length>0&&<div style={{overflowY:layers.length>MAX_VIS?'auto':'visible',maxHeight:layers.length>MAX_VIS?MAX_VIS*LANE_H+16:undefined,flexShrink:0}}>
+              {layers.map(li=>{
+                const isActive=activeLayer===li;const lCol=li===0?th.ac:layerColor(li);
+                const lBlocks=trackBlocks.filter(b=>b.layer===li);
+                const lVol=layerVols[li]??1;
                 return(
-                <div key={bl.id} onClick={()=>{setTrackSel(isSel?null:bl.id);if(!isSel)setTrackBlockFx({...bl.fx});}}
-                  style={{position:'absolute',left:`calc(48px + ${left}% * (1 - 48px/100%))`,width:`max(40px, ${width}%)`,top:top+2,height:LANE_H-4,
-                    background:bl.color+(isSel?'55':'33'),border:`1.5px solid ${isSel?'#fff':bl.color}`,borderRadius:4,cursor:'pointer',overflow:'hidden',
-                    opacity:bl.mute?.4:1,transition:'border .1s',zIndex:isSel?3:2}}>
-                  <div style={{padding:'2px 5px',display:'flex',alignItems:'center',gap:4}}>
-                    <span style={{fontSize:9,fontWeight:700,color:bl.color,flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{bl.name}</span>
-                    <span style={{fontSize:8,color:'rgba(255,255,255,.5)'}}>{ft(bl.buffer.duration)}</span>
+                <div key={li} style={{display:'flex',height:LANE_H,marginBottom:3,border:`1.5px solid ${isActive?lCol:th.bd}`,borderRadius:6,overflow:'hidden',background:th.bgD,cursor:'pointer'}} onClick={()=>setActiveLayer(li)}>
+                  {/* Track label column */}
+                  <div style={{width:LBL_W,flexShrink:0,background:isActive?lCol+'22':th.bgP,borderRight:`1px solid ${isActive?lCol:th.bd}`,display:'flex',flexDirection:'column',justifyContent:'center',padding:'4px 6px',gap:2}}>
+                    <div style={{display:'flex',alignItems:'center',gap:4}}>
+                      <div style={{width:6,height:6,borderRadius:'50%',background:lCol,flexShrink:0}}/>
+                      <span style={{fontSize:10,fontWeight:700,color:lCol,flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{li===0?'MAIN':`Track ${li}`}</span>
+                    </div>
+                    <input type="range" min={0} max={1.5} step={.05} value={lVol} onClick={e=>e.stopPropagation()} onChange={e=>{e.stopPropagation();setLayerVols(lv=>({...lv,[li]:+e.target.value}));}} style={{width:'100%',height:4,accentColor:lCol}} title={`Hlasitosť ${(lVol*100).toFixed(0)}%`}/>
+                    {li>0&&<button style={{fontSize:8,background:lCol+'22',border:`1px solid ${lCol}44`,color:lCol,borderRadius:3,padding:'1px 4px',cursor:'pointer'}} onClick={e=>{e.stopPropagation();bakeLayerIntoMain(li);}} title="Zlúčiť do MAIN (zakomponovať napevno)">→ MAIN</button>}
                   </div>
-                  {/* Mini waveform indicator (bars) */}
-                  <div style={{position:'absolute',bottom:0,left:0,right:0,height:24,display:'flex',alignItems:'flex-end',gap:.5,padding:'0 2px',opacity:.6}}>
-                    {Array.from({length:32},(_,i)=>{const ch=bl.buffer.getChannelData(0);const step=Math.floor(ch.length/32);let mx=0;for(let j=0;j<step;j++){const v=Math.abs(ch[i*step+j]||0);if(v>mx)mx=v;}return(<div key={i} style={{flex:1,background:bl.color,borderRadius:1,height:`${mx*100}%`,minHeight:1}}/>);})}
+                  {/* Timeline area */}
+                  <div style={{flex:1,position:'relative',overflow:'hidden',background:isActive?lCol+'08':'transparent'}}>
+                    {/* Playhead */}
+                    {totalDur>0&&trackPlaying&&<div style={{position:'absolute',top:0,bottom:0,left:`${(trackPos/totalDur)*100}%`,width:1.5,background:'rgba(255,255,255,.8)',zIndex:5,pointerEvents:'none'}}/>}
+                    {/* Blocks */}
+                    {lBlocks.map(bl=>{
+                      const left=totalDur>0?(bl.startSec/totalDur*100):0;
+                      const width=totalDur>0?Math.max(.5,bl.buffer.duration/totalDur*100):5;
+                      const isSel=trackSel===bl.id;
+                      return(
+                      <div key={bl.id} onClick={e=>{e.stopPropagation();setTrackSel(isSel?null:bl.id);if(!isSel)setTrackBlockFx({...bl.fx});}}
+                        style={{position:'absolute',left:`${left}%`,width:`${width}%`,top:2,bottom:2,
+                          background:bl.color+(isSel?'55':'28'),border:`1.5px solid ${isSel?'#fff':bl.color+(bl.mute?'44':'99')}`,
+                          borderRadius:3,cursor:'pointer',overflow:'hidden',opacity:bl.mute?.35:1,zIndex:isSel?4:2,transition:'border .1s'}}>
+                        <div style={{padding:'1px 4px',display:'flex',gap:3,alignItems:'center'}}>
+                          <span style={{fontSize:8,fontWeight:700,color:bl.color,flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{bl.name}</span>
+                          <span style={{fontSize:7,color:'rgba(255,255,255,.4)',whiteSpace:'nowrap'}}>{ft(bl.buffer.duration)}</span>
+                        </div>
+                        <div style={{position:'absolute',bottom:0,left:0,right:0,height:20,display:'flex',alignItems:'flex-end',gap:.3,padding:'0 2px',opacity:.5}}>
+                          {Array.from({length:24},(_,i)=>{const c=bl.buffer.getChannelData(0);const st=Math.floor(c.length/24);let mx=0;for(let j=0;j<st;j++){const v=Math.abs(c[i*st+j]||0);if(v>mx)mx=v;}return(<div key={i} style={{flex:1,background:bl.color,borderRadius:1,height:`${mx*100}%`,minHeight:1}}/>);})}
+                        </div>
+                      </div>);
+                    })}
                   </div>
                 </div>);
               })}
             </div>}
-            {/* Selected block controls */}
-            {selBlock&&<div style={{marginTop:8,background:th.bgD,borderRadius:6,border:`1px solid ${selBlock.color}`,padding:10}}>
-              <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8,flexWrap:'wrap'}}>
+
+            {/* Selected block edit panel — shows below tracks */}
+            {selBlock&&<div style={{background:th.bgD,borderRadius:6,border:`2px solid ${selBlock.color}`,padding:10,flexShrink:0}}>
+              <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:8,flexWrap:'wrap'}}>
+                <div style={{width:8,height:8,borderRadius:'50%',background:selBlock.color,flexShrink:0}}/>
                 <span style={{fontSize:12,fontWeight:700,color:selBlock.color,flex:1}}>{selBlock.name}</span>
                 <span style={{fontSize:10,color:th.txD}}>{ft(selBlock.buffer.duration)}</span>
-                <button style={{...sb(false,th.ac2,th),fontSize:10,padding:'3px 10px'}} onClick={()=>{const ctx=getCtx();if(ctx.state==='suspended')ctx.resume();const s=ctx.createBufferSource();s.buffer=selBlock.buffer;if(!masterGR.current){masterGR.current=ctx.createGain();masterGR.current.connect(ctx.destination);}const g=ctx.createGain();g.gain.value=selBlock.vol;s.connect(g);g.connect(masterGR.current);s.start();}}>▶ Prehrať</button>
-                <button style={{...sb(selBlock.mute,th.red,th),fontSize:10,padding:'3px 10px'}} onClick={()=>setTrackBlocks(p=>p.map(b=>b.id===trackSel?{...b,mute:!b.mute}:b))}>{selBlock.mute?'Unmute':'Mute'}</button>
-                <button style={{...sb(false,th.ac3,th),fontSize:10,padding:'3px 10px'}} onClick={()=>{trackIdR.current++;setTrackBlocks(p=>[...p,{...selBlock,id:trackIdR.current,name:selBlock.name+'_dup',startSec:selBlock.startSec+selBlock.buffer.duration}]);}}>Duplikovať</button>
-                <button style={{...sb(false,null,th),fontSize:10,padding:'3px 10px'}} onClick={()=>splitTrackBlock(trackSel!,.5)}>Rozdeliť na ½</button>
-                <button style={{background:'none',border:`1px solid ${th.red}`,color:th.red,borderRadius:3,fontSize:10,padding:'3px 10px',cursor:'pointer'}} onClick={()=>{setTrackBlocks(p=>p.filter(b=>b.id!==trackSel));setTrackSel(null);}}>Odstrániť</button>
+                <button style={{...sb(false,th.ac2,th),fontSize:10,padding:'3px 9px'}} onClick={()=>{const ctx=getCtx();if(ctx.state==='suspended')ctx.resume();const s=ctx.createBufferSource();s.buffer=selBlock.buffer;if(!masterGR.current){masterGR.current=ctx.createGain();masterGR.current.connect(ctx.destination);}const g=ctx.createGain();g.gain.value=selBlock.vol;s.connect(g);g.connect(masterGR.current);s.start();}}>▶</button>
+                <button style={{...sb(false,null,th),fontSize:10,padding:'3px 9px'}} onClick={()=>addSample(selBlock.name,selBlock.buffer)} title="Uložiť blok do Library">→ Library</button>
+                <button style={{...sb(false,null,th),fontSize:10,padding:'3px 9px'}} onClick={()=>{const buf=renderBlockWithOverlap(trackSel!);if(buf)addSample(selBlock.name+'_mix',buf);}} title="Render tohto bloku + všetky prekrývajúce sa zvuky z ostatných trackov → Library">+ prekryvy → Library</button>
+                <button style={{...sb(false,null,th),fontSize:10,padding:'3px 9px'}} onClick={()=>doExport(selBlock.buffer,selBlock.name)} title="Export bloku ako WAV">Export WAV</button>
+                <button style={{...sb(selBlock.mute,th.red,th),fontSize:10,padding:'3px 9px'}} onClick={()=>setTrackBlocks(p=>p.map(b=>b.id===trackSel?{...b,mute:!b.mute}:b))}>{selBlock.mute?'Unmute':'Mute'}</button>
+                <button style={{...sb(false,th.ac3,th),fontSize:10,padding:'3px 9px'}} onClick={()=>{trackIdR.current++;setTrackBlocks(p=>[...p,{...selBlock,id:trackIdR.current,name:selBlock.name+'_dup',startSec:selBlock.startSec+selBlock.buffer.duration}]);}}>Dup</button>
+                <button style={{...sb(false,null,th),fontSize:10,padding:'3px 9px'}} onClick={()=>splitTrackBlock(trackSel!,.5)}>Split ½</button>
+                <button style={{background:'none',border:`1px solid ${th.red}`,color:th.red,borderRadius:3,fontSize:10,padding:'3px 9px',cursor:'pointer'}} onClick={()=>{setTrackBlocks(p=>p.filter(b=>b.id!==trackSel));setTrackSel(null);}}>×</button>
               </div>
-              <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center',marginBottom:8}}>
-                <div style={{flex:1,minWidth:150}}>
+              <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:8}}>
+                <div style={{flex:1,minWidth:120}}>
                   <div style={{fontSize:9,color:th.txD,marginBottom:2}}>Hlasitosť: {(selBlock.vol*100).toFixed(0)}%</div>
                   <input type="range" min={0} max={1.5} step={.01} value={selBlock.vol} onChange={e=>setTrackBlocks(p=>p.map(b=>b.id===trackSel?{...b,vol:+e.target.value}:b))} style={{width:'100%',accentColor:selBlock.color}}/>
                 </div>
-                <div style={{flex:1,minWidth:150}}>
+                <div style={{flex:1,minWidth:120}}>
                   <div style={{fontSize:9,color:th.txD,marginBottom:2}}>Rýchlosť: {(trackBlockFx.speed||1).toFixed(2)}×</div>
-                  <input type="range" min={.25} max={4} step={.01} value={trackBlockFx.speed||1} onChange={e=>{const v=+e.target.value;setTrackBlockFx(f=>({...f,speed:v}));}} style={{width:'100%',accentColor:selBlock.color}}/>
+                  <input type="range" min={.25} max={4} step={.01} value={trackBlockFx.speed||1} onChange={e=>setTrackBlockFx(f=>({...f,speed:+e.target.value}))} style={{width:'100%',accentColor:selBlock.color}}/>
                 </div>
-                <button style={{...sb(false,th.ac2,th),padding:'4px 12px',fontSize:10}} onClick={()=>{const ctx=getCtx();let buf=selBlock.buffer;const nfx={...trackBlockFx};if(JSON.stringify(nfx)!==JSON.stringify(FX0)){buf=applyFx(buf,nfx,ctx);if(nfx.loop>1)buf=mkLoop(buf,nfx.loop,.02,ctx);}setTrackBlocks(p=>p.map(b=>b.id===trackSel?{...b,buffer:buf,fx:{...nfx}}:b));setLog(p=>[...p,`▸ FX aplikované na Track blok "${selBlock.name}"`]);}}>Použiť FX</button>
+                <button style={{...sb(false,th.ac2,th),padding:'4px 14px',fontSize:10,alignSelf:'flex-end'}} onClick={()=>{const ctx=getCtx();let buf=selBlock.buffer;const nfx={...trackBlockFx};buf=applyFx(buf,nfx,ctx);if(nfx.loop>1)buf=mkLoop(buf,nfx.loop,.02,ctx);setTrackBlocks(p=>p.map(b=>b.id===trackSel?{...b,buffer:buf,fx:{...nfx}}:b));setLog(p=>[...p,`▸ FX → "${selBlock.name}"`]);}}>Použiť FX</button>
               </div>
-              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(140px,1fr))',gap:6}}>
+              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(130px,1fr))',gap:5}}>
                 {([['Skreslenie',(trackBlockFx.saturation*100).toFixed(0)+'%','saturation',0,1,.01],['Reverb',(trackBlockFx.reverb*100).toFixed(0)+'%','reverb',0,1,.01],['Chorus',(trackBlockFx.chorus*100).toFixed(0)+'%','chorus',0,1,.01],['Bitcrusher',(trackBlockFx.bitCrush*100).toFixed(0)+'%','bitCrush',0,1,.01],['Filter LP',trackBlockFx.lpFreq>=20000?'OFF':(trackBlockFx.lpFreq/1000).toFixed(1)+'k','lpFreq',200,20000,100],['Delay',(trackBlockFx.delay*100).toFixed(0)+'%','delay',0,1,.01]] as [string,string,string,number,number,number][]).map(([lbl,val,key,mn,mx,st])=>(
-                  <div key={key} style={{background:th.bgP,border:`1px solid ${th.bd}`,borderRadius:4,padding:'5px 8px'}}>
-                    <div style={{display:'flex',justifyContent:'space-between',marginBottom:3}}><span style={{fontSize:9,color:th.txD}}>{lbl}</span><span style={{fontSize:10,color:selBlock.color,fontWeight:700}}>{val}</span></div>
+                  <div key={key} style={{background:th.bgP,border:`1px solid ${th.bd}`,borderRadius:4,padding:'4px 7px'}}>
+                    <div style={{display:'flex',justifyContent:'space-between',marginBottom:2}}><span style={{fontSize:8,color:th.txD}}>{lbl}</span><span style={{fontSize:9,color:selBlock.color,fontWeight:700}}>{val}</span></div>
                     <input type="range" min={mn} max={mx} step={st} value={(trackBlockFx as any)[key]} onChange={e=>setTrackBlockFx(f=>({...f,[key]:+e.target.value}))} style={{width:'100%',accentColor:selBlock.color}}/>
                   </div>
                 ))}
