@@ -192,7 +192,7 @@ const KIT_PATTERNS: {s:number,steps:number[],ratchets?:number[],isKick?:boolean,
   ],
 ];
 
-const MKCH=(sc: number)=>({sampleIdx:0,steps:new Array(sc).fill(false),velocities:new Array(sc).fill(80),ratchets:new Array(sc).fill(1),filterAuto:new Array(sc).fill(1),vol:.8,pan:0,pitch:1,mute:false,solo:false,eqL:1,eqM:1,eqH:1,sidechain:false,isKick:false,truncate:false});
+const MKCH=(sc: number)=>({sampleIdx:0,steps:new Array(sc).fill(false),velocities:new Array(sc).fill(80),ratchets:new Array(sc).fill(1),filterAuto:new Array(sc).fill(1),vol:.8,pan:0,pitch:1,mute:false,solo:false,eqL:1,eqM:1,eqH:1,sidechain:false,isKick:false,truncate:false,playMark:false});
 
 const SYSP_CL=`ROLA: AI producent. Slovenčina. STRUČNE - max 2 vety v message.
 FORMÁT: VŽDY zavolaj funkciu execute_audio_operations s {message:"krátka odpoveď", operations:[{op:"..."}]}. Nepíš voľný text ani markdown.
@@ -300,6 +300,9 @@ export default function App(){
   const trackSrcR=useRef<AudioBufferSourceNode[]>([]);
   const trackStR=useRef(0);
   const trackAfR=useRef<number|null>(null);
+  const dragRef=useRef<any>(null);
+  const justMovedRef=useRef(false);
+  const[dragDur,setDragDur]=useState<number|null>(null);
   const[showClips,setShowClips]=useState(false);
   const[clips,setClips]=useState<any[]>([]);
   const[clipSel,setClipSel]=useState<number|null>(null);
@@ -623,17 +626,18 @@ export default function App(){
             {!cur&&<div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',color:th.txD,fontSize:12,fontWeight:600,letterSpacing:2}}>SELECT A SAMPLE</div>}
           </div>
         </div>
-        {cur&&<div style={{display:'flex',gap:4,padding:'6px 8px',borderBottom:`1px solid ${th.bd}`,flexShrink:0,background:th.bgD}}>
-          <button style={sb(false,null,th)} onClick={()=>{const ctx=getCtx();const b=trimSil(cur.buffer,ctx);setSamples(p=>p.map((s,i)=>i===sel?{...s,buffer:b,info:analyze(b)}:s));}}>Trim Silence</button>
-          {wfSel&&<button style={sb(false,null,th)} onClick={()=>{const ctx=getCtx();const b=cropR(cur.buffer,wfSel.start,wfSel.end,ctx);setSamples(p=>p.map((s,i)=>i===sel?{...s,buffer:b,info:analyze(b)}:s));setWfSel(null);}}>Crop Selection</button>}
+        {cur&&<div style={{display:'flex',gap:4,padding:'6px 8px',borderBottom:`1px solid ${th.bd}`,flexShrink:0,background:th.bgD,flexWrap:'wrap'}}>
+          <button style={sb(false,null,th)} onClick={()=>{setUndoStack(p=>[...p.slice(-19),snapshot()]);setRedoStack([]);const ctx=getCtx();const b=trimSil(cur.buffer,ctx);setSamples(p=>p.map((s,i)=>i===sel?{...s,buffer:b,info:analyze(b)}:s));}}>Trim Silence</button>
+          {wfSel&&<button style={sb(false,null,th)} onClick={()=>{setUndoStack(p=>[...p.slice(-19),snapshot()]);setRedoStack([]);const ctx=getCtx();const b=cropR(cur.buffer,wfSel.start,wfSel.end,ctx);setSamples(p=>p.map((s,i)=>i===sel?{...s,buffer:b,info:analyze(b)}:s));setWfSel(null);}}>Crop Selection</button>}
           <button style={sb(true,th.ac2,th)} onClick={()=>{const ctx=getCtx();const r=wfSel||{start:0,end:Math.min(1,1/cur.buffer.duration)};const b=cropR(cur.buffer,r.start,r.end,ctx);addSample(cur.name+'_clip',b);setWfSel(null);setLog(p=>[...p,`✓ Krátky zvuk "${cur.name}_clip" (${ft(b.duration)})`]);}} title="Vytvor krátky zvuk z výberu (alebo prvá 1s) a pridaj do knižnice">Create Sound</button>
-          {wfSel&&<button style={sb(false,null,th)} onClick={()=>{const ctx=getCtx();const t=wfSel.start*cur.buffer.duration;const[a,b2]=splitAt(cur.buffer,t,ctx);const nm=cur.name;setSamples(p=>{const n=[...p];n[sel as number]={...n[sel as number],name:nm+'_A',buffer:a,info:analyze(a)};n.push({name:nm+'_B',buffer:b2,info:analyze(b2),original:b2});return n;});setWfSel(null);setLog(p=>[...p,`▸ Split "${nm}" @ ${t.toFixed(2)}s`]);}}>Split Here</button>}
+          {wfSel&&<button style={sb(false,null,th)} onClick={()=>{setUndoStack(p=>[...p.slice(-19),snapshot()]);setRedoStack([]);const ctx=getCtx();const t=wfSel.start*cur.buffer.duration;const[a,b2]=splitAt(cur.buffer,t,ctx);const nm=cur.name;setSamples(p=>{const n=[...p];n[sel as number]={...n[sel as number],name:nm+'_A',buffer:a,info:analyze(a)};n.push({name:nm+'_B',buffer:b2,info:analyze(b2),original:b2});return n;});setWfSel(null);setLog(p=>[...p,`▸ Split "${nm}" @ ${t.toFixed(2)}s`]);}}>Split Here</button>}
           <button style={sb(false,null,th)} onClick={()=>{if(samples.length<2)return;const ctx=getCtx();const bufs=samples.map(s=>s.buffer);const merged=mergeBufs(bufs,[],ctx);addSample('Merged_'+Date.now()%10000,merged);setLog(p=>[...p,`▸ Merge all → nová vzorka`]);}}>Merge All</button>
-          <button style={sb(false,null,th)} onClick={()=>{const ctx=getCtx();const b=applyFx(cur.buffer,{normalize:true},ctx);setSamples(p=>p.map((s,i)=>i===sel?{...s,buffer:b,info:analyze(b)}:s));}}>Normalize</button>
-          <button style={sb(false,null,th)} onClick={()=>{const ctx=getCtx();const b=applyFx(cur.buffer,{reverse:true},ctx);setSamples(p=>p.map((s,i)=>i===sel?{...s,buffer:b,info:analyze(b)}:s));}}>Reverse</button>
+          <button style={sb(false,null,th)} onClick={()=>{setUndoStack(p=>[...p.slice(-19),snapshot()]);setRedoStack([]);const ctx=getCtx();const b=applyFx(cur.buffer,{normalize:true},ctx);setSamples(p=>p.map((s,i)=>i===sel?{...s,buffer:b,info:analyze(b)}:s));}}>Normalize</button>
+          <button style={sb(false,null,th)} onClick={()=>{setUndoStack(p=>[...p.slice(-19),snapshot()]);setRedoStack([]);const ctx=getCtx();const b=applyFx(cur.buffer,{reverse:true},ctx);setSamples(p=>p.map((s,i)=>i===sel?{...s,buffer:b,info:analyze(b)}:s));}}>Reverse</button>
+          <button style={sb(false,th.ac2,th)} onClick={()=>{if(!cur)return;const nm=cur.name+'_lib';addSample(nm,cur.buffer,cur.color,cur.tag);setLog(p=>[...p,`✓ "${nm}" pridaný do knižnice`]);}} title="Ulož aktuálnu (upravenú) verziu vzorky ako novú položku v knižnici">➕ Library</button>
           <button style={sb(false,null,th)} onClick={()=>{const nm=cur.name+'_dup';setSamples(p=>[...p,{...cur,name:nm}]);setSel(samples.length);}}>Duplicate</button>
-          <button style={sb(false,null,th)} onClick={()=>setSamples(p=>p.map((s,i)=>i===sel?{...s,buffer:s.original,info:analyze(s.original)}:s))}>Reset</button>
-          <button style={sb(false,null,th)} onClick={()=>doExport()}>Export Sample</button>
+          <button style={sb(false,null,th)} onClick={()=>{setUndoStack(p=>[...p.slice(-19),snapshot()]);setRedoStack([]);setSamples(p=>p.map((s,i)=>i===sel?{...s,buffer:s.original,info:analyze(s.original)}:s));}}>Reset</button>
+          <button style={sb(false,null,th)} onClick={()=>doExport()}>Export WAV</button>
         </div>}
 
         {/* Tabs */}
@@ -663,6 +667,10 @@ export default function App(){
               <div style={{width:1,height:20,background:th.bd}}/>
               <button onClick={()=>addSeqToTrack('h')} disabled={!channels.length} style={{...sb(false,th.ac3,th),fontSize:10,padding:'3px 10px'}} title="Bounce + pridaj za Track">SEQ→Track</button>
               <button onClick={()=>addSeqToTrack('v')} disabled={!channels.length} style={{...sb(false,th.ac3,th),fontSize:10,padding:'3px 10px'}} title="Bounce + pridaj paralelne k Tracku">SEQ↕Track</button>
+              <button onClick={()=>doBounce()} disabled={!channels.length} style={{...sb(false,th.ac2,th),fontSize:10,padding:'3px 10px'}} title="Ulož sekvenciu ako vzorku do knižnice">SEQ→Knižnica</button>
+              <button onClick={()=>{const ctx=getCtx();const buf=bouncePat(channels,samples,bpm,stepCount,swing,ctx);doExport(buf,`SEQ_${bpm}bpm`);}} disabled={!channels.length} style={{...sb(false,null,th),fontSize:10,padding:'3px 10px'}} title="Exportuj sekvenciu ako WAV">Export SEQ</button>
+              {channels.some((c:any)=>c.solo)&&<button onClick={()=>setChannels((p:any[])=>p.map((c:any)=>({...c,solo:false})))} style={{...sb(true,th.ac2,th),fontSize:10,padding:'3px 10px'}} title="Zruš solo — znova hrá celá sekvencia">⊘ Sólo</button>}
+              {channels.some((c:any)=>c.playMark)&&<button onClick={()=>{const marked=channels.filter((c:any)=>c.playMark);if(!marked.length)return;stopSeq();const ctx=getCtx();if(ctx.state==='suspended')ctx.resume();if(!masterGR.current){masterGR.current=ctx.createGain();masterGR.current.connect(ctx.destination);}masterGR.current.gain.value=mvR.current;csR.current=0;nstR.current=ctx.currentTime+.05;setSeqPlaying(true);const sched=()=>{const chs=chRef.current.filter((_:any,i:number)=>chRef.current[i]?.playMark);const smp=smpRef.current,bp=bpmRef.current,sw=swRef.current,sc=Math.max(1,scR.current|0);const stepDur=60/bp/4;while(nstR.current<ctx.currentTime+.1){const st=csR.current%sc;setCurStep(st);const swOff=st%2===1?(sw-50)/100*stepDur:0;for(const ch of chs){if(ch.mute||!ch.steps[st])continue;const s=smp[ch.sampleIdx];if(!s)continue;const ratch=Math.max(1,Math.min(8,Math.floor(Number(ch.ratchets?.[st])||1)));const vel=(ch.velocities?.[st]??80)/127;for(let r=0;r<ratch;r++){const src=ctx.createBufferSource();src.buffer=s.buffer;if(ch.pitch&&isFinite(ch.pitch)&&ch.pitch>0&&ch.pitch!==1)src.playbackRate.value=ch.pitch;const g=ctx.createGain();g.gain.value=Math.max(0,ch.vol*vel/ratch);src.connect(g);g.connect(masterGR.current!);const when=nstR.current+swOff+r*(stepDur/ratch);src.start(Math.max(ctx.currentTime,when));}}nstR.current+=stepDur;csR.current++;}};seqTR.current=setInterval(sched,25);}} style={{...sb(true,th.ac3,th),fontSize:10,padding:'3px 10px'}} title="Prehrať iba označené stopy (★)">▶ Označené</button>}
             </div>
 
             {/* SEQ Overview waveform */}
@@ -753,9 +761,9 @@ export default function App(){
               </div>
 
               {/* Lanes — one per sound, timed across the track */}
-              {channels.map((ch:any,ci:number)=>{const s=samples[ch.sampleIdx];const col=cols[ci%cols.length];
+              {channels.map((ch:any,ci:number)=>{const s=samples[ch.sampleIdx];const col=cols[ci%cols.length];const anySolo=channels.some((c:any)=>c.solo);const dimmed=anySolo&&!ch.solo;
                 return(
-                <div key={ci} style={{marginBottom:4}}>
+                <div key={ci} style={{marginBottom:4,opacity:dimmed?.38:1,transition:'opacity .12s'}}>
                   <div style={{display:'flex',alignItems:'stretch',gap:2}}>
                     {/* Lane header (left) */}
                     <div style={{width:LBL,flexShrink:0,background:th.bgD,border:`1px solid ${ch.mute?th.bd:col+'44'}`,borderRadius:4,padding:'4px 6px',display:'flex',flexDirection:'column',gap:3,opacity:ch.mute?.55:1}}>
@@ -769,8 +777,9 @@ export default function App(){
                         <button onClick={()=>nudgeCh(ci,1)} style={{...sb(false,null,th),fontSize:10,padding:'1px 5px'}} title="Posuň neskôr (o 1 krok vpravo)">▶</button>
                         <input type="range" min={0} max={1.5} step={.01} value={ch.vol} onChange={e=>updCh(ci,'vol',+e.target.value)} style={{flex:1,height:5,accentColor:col}} title="Hlasitosť"/>
                         <button onClick={()=>updCh(ci,'mute',!ch.mute)} style={{...sb(ch.mute,th.red,th),fontSize:9,padding:'1px 5px'}}>M</button>
-                        <button onClick={()=>updCh(ci,'solo',!ch.solo)} style={{...sb(ch.solo,th.ac2,th),fontSize:9,padding:'1px 5px'}}>S</button>
-                        <button onClick={()=>updCh(ci,'truncate',!ch.truncate)} style={{...sb(ch.truncate,th.ac3,th),fontSize:9,padding:'1px 5px'}} title="Orezať zvuk na dĺžku stepu (zabraňuje prekrývaniu dlhých zvukov)">✂</button>
+                        <button onClick={()=>updCh(ci,'solo',!ch.solo)} style={{...sb(ch.solo,th.ac2,th),fontSize:9,padding:'1px 5px'}} title="Solo — hrá iba táto stopa (môžeš zapnúť viac)">S</button>
+                        <button onClick={()=>updCh(ci,'playMark',!ch.playMark)} style={{...sb(ch.playMark,th.ac3,th),fontSize:9,padding:'1px 5px'}} title="Označ pre selektívne prehranie (▶ Označené)">★</button>
+                        <button onClick={()=>updCh(ci,'truncate',!ch.truncate)} style={{...sb(ch.truncate,null,th),fontSize:9,padding:'1px 5px'}} title="Orezať zvuk na dĺžku stepu">✂</button>
                       </div>
                       {isTK&&<div style={{display:'flex',gap:3}}>
                         <button onClick={()=>updCh(ci,'isKick',!ch.isKick)} style={{...sb(ch.isKick,th.ac3,th),fontSize:8,padding:'1px 5px',flex:1}} title="Kick (zdroj sidechain)">KICK</button>
@@ -805,7 +814,7 @@ export default function App(){
                   {editCh===ci&&(
                     <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(120px,1fr))',gap:8,marginTop:4,marginLeft:LBL+2,padding:8,background:th.bgP,borderRadius:4}}>
                       <div><div style={{fontSize:9,color:th.txD,marginBottom:2}}>Pan</div><input type="range" min={-1} max={1} step={.01} value={ch.pan} onChange={e=>updCh(ci,'pan',+e.target.value)} style={{width:'100%',accentColor:col}}/></div>
-                      <div><div style={{fontSize:9,color:th.txD,marginBottom:2}}>Pitch</div><input type="range" min={.25} max={4} step={.01} value={ch.pitch} onChange={e=>updCh(ci,'pitch',+e.target.value)} style={{width:'100%',accentColor:col}}/><div style={{fontSize:9,color:th.txD,textAlign:'center'}}>{ch.pitch.toFixed(2)}x</div></div>
+                      <div><div style={{fontSize:9,color:th.txD,marginBottom:2}}>Rýchlosť / Pitch</div><input type="range" min={.25} max={4} step={.01} value={ch.pitch} onChange={e=>updCh(ci,'pitch',+e.target.value)} style={{width:'100%',accentColor:col}}/><div style={{display:'flex',justifyContent:'space-between'}}><span style={{fontSize:9,color:th.txD}}>{ch.pitch.toFixed(2)}×</span><button style={{...sb(false,th.ac2,th),fontSize:8,padding:'1px 5px'}} onClick={()=>{const ctx=getCtx();const spd=ch.pitch||1;if(spd===1)return;const buf=applyFx(samples[ch.sampleIdx]?.buffer,{speed:spd},ctx);if(!buf)return;const nm=(samples[ch.sampleIdx]?.name||'zvuk')+'_spd';addSample(nm,buf);updCh(ci,'pitch',1);setLog(p=>[...p,`▸ Rýchlosť ${spd}× aplikovaná na "${nm}"`]);updCh(ci,'sampleIdx',samples.length);}} title="Aplikuj rýchlosť na buffer (preresamplovanie) a zresetuj pitch na 1×">Apply</button></div></div>
                       <div><div style={{fontSize:9,color:'#f66',marginBottom:2}}>Bass</div><input type="range" min={0} max={3} step={.05} value={ch.eqL} onChange={e=>updCh(ci,'eqL',+e.target.value)} style={{width:'100%',accentColor:'#f66'}}/></div>
                       <div><div style={{fontSize:9,color:'#fc4',marginBottom:2}}>Mid</div><input type="range" min={0} max={3} step={.05} value={ch.eqM} onChange={e=>updCh(ci,'eqM',+e.target.value)} style={{width:'100%',accentColor:'#fc4'}}/></div>
                       <div><div style={{fontSize:9,color:'#4af',marginBottom:2}}>High</div><input type="range" min={0} max={3} step={.05} value={ch.eqH} onChange={e=>updCh(ci,'eqH',+e.target.value)} style={{width:'100%',accentColor:'#4af'}}/></div>
@@ -822,9 +831,41 @@ export default function App(){
         {panel==='track'&&(()=>{
           const totalDur=trackBlocks.reduce((mx,b)=>Math.max(mx,b.startSec+b.buffer.duration),0);
           const LANE_H=60;const LBL_W=88;const MAX_VIS=3;
+          const dispDur=dragDur??totalDur;
           const layers=[...new Set(trackBlocks.map(b=>b.layer))].sort((a,b)=>a-b);
           const selBlock=trackBlocks.find(b=>b.id===trackSel)||null;
           const layerColor=(l:number)=>SWATCH[(l*3)%SWATCH.length];
+          const beginBlockDrag=(e:any,bl:any,laneEl:HTMLElement)=>{
+            if(!(totalDur>0))return;
+            const w=laneEl.getBoundingClientRect().width;if(!(w>0))return;
+            justMovedRef.current=false;
+            dragRef.current={id:bl.id,x0:e.clientX,y0:e.clientY,start0:bl.startSec,layer0:bl.layer,pxPerSec:w/totalDur,moved:false};
+            setDragDur(totalDur);
+            try{(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);}catch{}
+          };
+          const moveBlockDrag=(e:any,id:number)=>{
+            const d=dragRef.current;if(!d||d.id!==id)return;
+            const dx=e.clientX-d.x0,dy=e.clientY-d.y0;
+            if(!d.moved&&(Math.abs(dx)>3||Math.abs(dy)>8))d.moved=true;
+            if(!d.moved)return;
+            justMovedRef.current=true;
+            const next=Math.max(0,d.start0+dx/d.pxPerSec);
+            if(!Number.isFinite(next))return;
+            const layerShift=Math.round(dy/(LANE_H+3));
+            const newLayer=Math.max(0,d.layer0+layerShift);
+            setTrackBlocks(p=>p.map(b=>b.id===id?{...b,startSec:next,layer:newLayer}:b));
+          };
+          const endBlockDrag=(e:any,id:number)=>{
+            try{(e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);}catch{}
+            const d=dragRef.current;
+            dragRef.current=null;setDragDur(null);
+            if(d?.moved)setLayerVols(lv=>{const needed=trackBlocks.find(b=>b.id===id);if(needed&&!(needed.layer in lv))return{...lv,[needed.layer]:1};return lv;});
+          };
+          const clickBlock=(e:any,bl:any,isSel:boolean)=>{
+            e.stopPropagation();
+            if(justMovedRef.current){justMovedRef.current=false;return;}
+            setTrackSel(isSel?null:bl.id);if(!isSel)setTrackBlockFx({...bl.fx});
+          };
           return(
           <div style={{flex:1,overflow:'auto',padding:8,background:th.bg,display:'flex',flexDirection:'column',gap:6}}>
             {/* Transport — stays at top */}
@@ -849,8 +890,8 @@ export default function App(){
             {trackBlocks.length>0&&<div style={{display:'flex',background:th.bgP,borderRadius:4,border:`1px solid ${th.bd}`,flexShrink:0,overflow:'hidden'}}>
               <div style={{width:LBL_W,flexShrink:0,borderRight:`1px solid ${th.bd}`}}/>
               <div style={{flex:1,height:18,position:'relative'}}>
-                {totalDur>0&&Array.from({length:Math.min(20,Math.ceil(totalDur)+1)},(_,i)=>(
-                  <div key={i} style={{position:'absolute',left:`${(i/totalDur)*100}%`,top:0,height:'100%',borderLeft:`1px solid ${th.bd}33`,paddingLeft:2}}>
+                {dispDur>0&&Array.from({length:Math.min(20,Math.ceil(dispDur)+1)},(_,i)=>(
+                  <div key={i} style={{position:'absolute',left:`${(i/dispDur)*100}%`,top:0,height:'100%',borderLeft:`1px solid ${th.bd}33`,paddingLeft:2}}>
                     <span style={{fontSize:8,color:th.txD,fontFamily:'monospace'}}>{ft(i)}</span>
                   </div>
                 ))}
@@ -872,22 +913,32 @@ export default function App(){
                       <span style={{fontSize:10,fontWeight:700,color:lCol,flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{li===0?'MAIN':`Track ${li}`}</span>
                     </div>
                     <input type="range" min={0} max={1.5} step={.05} value={lVol} onClick={e=>e.stopPropagation()} onChange={e=>{e.stopPropagation();setLayerVols(lv=>({...lv,[li]:+e.target.value}));}} style={{width:'100%',height:4,accentColor:lCol}} title={`Hlasitosť ${(lVol*100).toFixed(0)}%`}/>
-                    {li>0&&<button style={{fontSize:8,background:lCol+'22',border:`1px solid ${lCol}44`,color:lCol,borderRadius:3,padding:'1px 4px',cursor:'pointer'}} onClick={e=>{e.stopPropagation();bakeLayerIntoMain(li);}} title="Zlúčiť do MAIN (zakomponovať napevno)">→ MAIN</button>}
+                    {li>0&&<div style={{display:'flex',gap:3}}>
+                      <button style={{flex:1,fontSize:8,background:lCol+'22',border:`1px solid ${lCol}44`,color:lCol,borderRadius:3,padding:'1px 4px',cursor:'pointer'}} onClick={e=>{e.stopPropagation();bakeLayerIntoMain(li);}} title="Zlúčiť do MAIN (zakomponovať napevno)">→ MAIN</button>
+                      <button style={{fontSize:8,background:'#ff000022',border:'1px solid #ff000044',color:'#ff4455',borderRadius:3,padding:'1px 6px',cursor:'pointer'}} onClick={e=>{e.stopPropagation();setTrackBlocks(p=>p.filter(b=>b.layer!==li));setLayerVols(lv=>{const n={...lv};delete n[li];return n;});if(activeLayer===li)setActiveLayer(0);setTrackSel(s=>{const blk=trackBlocks.find(b=>b.id===s);return blk&&blk.layer===li?null:s;});setLog(p=>[...p,`▸ Track ${li} zmazaný`]);}} title="Zmazať celý tento track">Zmaž</button>
+                    </div>}
                   </div>
                   {/* Timeline area */}
-                  <div style={{flex:1,position:'relative',overflow:'hidden',background:isActive?lCol+'08':'transparent'}}>
+                  <div style={{flex:1,position:'relative',overflow:'hidden',background:isActive?lCol+'08':'transparent'}} data-lane={li}>
                     {/* Playhead */}
-                    {totalDur>0&&trackPlaying&&<div style={{position:'absolute',top:0,bottom:0,left:`${(trackPos/totalDur)*100}%`,width:1.5,background:'rgba(255,255,255,.8)',zIndex:5,pointerEvents:'none'}}/>}
+                    {dispDur>0&&trackPlaying&&<div style={{position:'absolute',top:0,bottom:0,left:`${(trackPos/dispDur)*100}%`,width:1.5,background:'rgba(255,255,255,.8)',zIndex:5,pointerEvents:'none'}}/>}
                     {/* Blocks */}
                     {lBlocks.map(bl=>{
-                      const left=totalDur>0?(bl.startSec/totalDur*100):0;
-                      const width=totalDur>0?Math.max(.5,bl.buffer.duration/totalDur*100):5;
+                      const left=dispDur>0?(bl.startSec/dispDur*100):0;
+                      const width=dispDur>0?Math.max(.5,bl.buffer.duration/dispDur*100):5;
                       const isSel=trackSel===bl.id;
+                      const isDragging=dragRef.current?.id===bl.id&&dragRef.current?.moved;
                       return(
-                      <div key={bl.id} onClick={e=>{e.stopPropagation();setTrackSel(isSel?null:bl.id);if(!isSel)setTrackBlockFx({...bl.fx});}}
+                      <div key={bl.id}
+                        onPointerDown={e=>{e.stopPropagation();const lane=(e.currentTarget as HTMLElement).parentElement;if(lane)beginBlockDrag(e,bl,lane);}}
+                        onPointerMove={e=>moveBlockDrag(e,bl.id)}
+                        onPointerUp={e=>endBlockDrag(e,bl.id)}
+                        onPointerCancel={e=>endBlockDrag(e,bl.id)}
+                        onLostPointerCapture={e=>endBlockDrag(e,bl.id)}
+                        onClick={e=>clickBlock(e,bl,isSel)}
                         style={{position:'absolute',left:`${left}%`,width:`${width}%`,top:2,bottom:2,
                           background:bl.color+(isSel?'55':'28'),border:`1.5px solid ${isSel?'#fff':bl.color+(bl.mute?'44':'99')}`,
-                          borderRadius:3,cursor:'pointer',overflow:'hidden',opacity:bl.mute?.35:1,zIndex:isSel?4:2,transition:'border .1s'}}>
+                          borderRadius:3,cursor:isDragging?'grabbing':'grab',overflow:'hidden',opacity:bl.mute?.35:1,zIndex:isSel?4:2,transition:isDragging?'none':'border .1s',touchAction:'none',userSelect:'none'}}>
                         <div style={{padding:'1px 4px',display:'flex',gap:3,alignItems:'center'}}>
                           <span style={{fontSize:8,fontWeight:700,color:bl.color,flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{bl.name}</span>
                           <span style={{fontSize:7,color:'rgba(255,255,255,.4)',whiteSpace:'nowrap'}}>{ft(bl.buffer.duration)}</span>
