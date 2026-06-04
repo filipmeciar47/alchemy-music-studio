@@ -311,6 +311,16 @@ export default function App(){
   const[seqPreviewBuf,setSeqPreviewBuf]=useState<AudioBuffer|null>(null);
   const seqCvR=useRef<HTMLCanvasElement|null>(null);
   let clipIdR=useRef(0);
+  // Decompositor state
+  const[showDecompose,setShowDecompose]=useState(false);
+  const[decompMode,setDecompMode]=useState<'track'|'stem'|'zoom'>('track');
+  const[decompStep,setDecompStep]=useState('');
+  const[decompResult,setDecompResult]=useState<any>(null);
+  const[decompLoading,setDecompLoading]=useState(false);
+  const[decompFile,setDecompFile]=useState<File|null>(null);
+  const[zoomTarget,setZoomTarget]=useState('');
+  const[zoomStart,setZoomStart]=useState('0:00');
+  const[zoomEnd,setZoomEnd]=useState('0:30');
 
   const channels=patterns[curPat]||[];
   const setChannels=(fn: any)=>setPatterns(p=>{const n=[...p];n[curPat]=typeof fn==='function'?fn(n[curPat]||[]):fn;return n;});
@@ -577,6 +587,7 @@ export default function App(){
         <span style={{fontSize:10,fontWeight:600,color:th.txD,letterSpacing:1}}>BPM</span>
         <input type="number" value={bpm} onChange={e=>setBpm(Math.max(40,Math.min(300,+e.target.value||128)))} style={{width:44,background:'transparent',border:'none',color:th.ac,fontSize:14,fontWeight:700,textAlign:'center',outline:'none',fontFamily:'inherit'}}/>
       </div>
+      <button onClick={()=>setShowDecompose(p=>!p)} style={{...sb(showDecompose,'#aa44ff',th),padding:'4px 12px',fontWeight:700,letterSpacing:.5,fontSize:11}} title="Multilayer Track Decompositor — izoluj stopy z nahrávky">⬡ DECOMPOSE</button>
       {isTK&&<div style={{display:'flex',alignItems:'center',gap:4,background:th.bgL,borderRadius:4,padding:'4px 8px',border:`1px solid ${th.bd}`}}>
         <span style={{fontSize:10,fontWeight:600,color:th.txD,letterSpacing:1}}>SWG</span>
         <input type="range" min={50} max={75} value={swing} onChange={e=>setSwing(+e.target.value)} style={{width:50,accentColor:th.ac}}/>
@@ -1108,6 +1119,183 @@ export default function App(){
     </div>
 
     <div style={{padding:'4px 12px',background:th.bgD,borderTop:`1px solid ${th.bd}`,fontSize:10,fontWeight:600,color:th.txD,display:'flex',gap:12,flexShrink:0}}>
+
+    {/* ── DECOMPOSE PANEL ── */}
+    {showDecompose&&(
+      <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.82)',zIndex:200,display:'flex',alignItems:'flex-start',justifyContent:'center',padding:'24px 16px',overflowY:'auto'}}>
+        <div style={{width:'100%',maxWidth:720,background:th.bgD,border:'1px solid #aa44ff66',borderRadius:10,padding:20,display:'flex',flexDirection:'column',gap:14,boxShadow:'0 12px 40px rgba(0,0,0,.6)'}}>
+          {/* Header */}
+          <div style={{display:'flex',alignItems:'center',gap:10}}>
+            <span style={{fontSize:14,fontWeight:800,color:'#aa44ff',letterSpacing:1}}>⬡ MULTILAYER DECOMPOSITOR</span>
+            <span style={{fontSize:10,color:th.txD,flex:1}}>Izoluj stopy z nahrávky pomocou Demucs + Gemini + GPT-4o</span>
+            <button onClick={()=>{setShowDecompose(false);setDecompResult(null);setDecompStep('');setDecompFile(null);}} style={{background:'none',border:'none',color:th.txD,cursor:'pointer',fontSize:18,lineHeight:1}}>×</button>
+          </div>
+
+          {/* Mode selection */}
+          {!decompLoading&&!decompResult&&<div style={{display:'flex',gap:8}}>
+            {([
+              ['track','Track Analysis','Rýchla · 4 stopy · základný prehľad','#44bbff'],
+              ['stem','Stem Analysis','Detailná · 6 stôp · identifikácia nástrojov','#00d4aa'],
+              ['zoom','Deep Zoom','Chirurgická · extrakt konkrétneho zvuku','#ffcc00'],
+            ] as [string,string,string,string][]).map(([m,title,sub,col])=>(
+              <div key={m} onClick={()=>setDecompMode(m as any)} style={{flex:1,padding:'10px 12px',border:`2px solid ${decompMode===m?col:th.bd}`,borderRadius:6,cursor:'pointer',background:decompMode===m?col+'18':'transparent',transition:'all .1s'}}>
+                <div style={{fontSize:12,fontWeight:700,color:col,marginBottom:3}}>{title}</div>
+                <div style={{fontSize:10,color:th.txD}}>{sub}</div>
+              </div>
+            ))}
+          </div>}
+
+          {/* Deep Zoom extra fields */}
+          {!decompLoading&&!decompResult&&decompMode==='zoom'&&(
+            <div style={{display:'flex',flexDirection:'column',gap:8,padding:'10px 12px',background:th.bgP,borderRadius:6,border:`1px solid ${'#ffcc00'}44`}}>
+              <div style={{fontSize:11,fontWeight:700,color:'#ffcc00'}}>Deep Zoom — nastavenia</div>
+              <div style={{fontSize:10,color:th.red}}>⚠ Používa prémiové spracovanie. Max 30 sekúnd fragmentu.</div>
+              <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
+                <div style={{flex:1,minWidth:180}}>
+                  <div style={{fontSize:9,color:th.txD,marginBottom:2}}>Cieľový nástroj / zvuk</div>
+                  <input value={zoomTarget} onChange={e=>setZoomTarget(e.target.value)} placeholder="napr. basa, gitara, spev..." style={{width:'100%',background:th.bgL,color:th.tx,border:`1px solid ${'#ffcc00'}44`,borderRadius:4,padding:'5px 8px',fontSize:12,fontFamily:'inherit',outline:'none'}}/>
+                </div>
+                <div style={{display:'flex',gap:6}}>
+                  <div><div style={{fontSize:9,color:th.txD,marginBottom:2}}>Začiatok</div><input value={zoomStart} onChange={e=>setZoomStart(e.target.value)} placeholder="0:00" style={{width:70,background:th.bgL,color:th.tx,border:`1px solid ${th.bd}`,borderRadius:4,padding:'5px 8px',fontSize:12,fontFamily:'monospace',outline:'none'}}/></div>
+                  <div><div style={{fontSize:9,color:th.txD,marginBottom:2}}>Koniec</div><input value={zoomEnd} onChange={e=>setZoomEnd(e.target.value)} placeholder="0:30" style={{width:70,background:th.bgL,color:th.tx,border:`1px solid ${th.bd}`,borderRadius:4,padding:'5px 8px',fontSize:12,fontFamily:'monospace',outline:'none'}}/></div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Upload + Library selector */}
+          {!decompLoading&&!decompResult&&(
+            <div style={{display:'flex',gap:10,flexWrap:'wrap',alignItems:'stretch'}}>
+              <label style={{flex:1,minWidth:200,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:6,padding:'20px 12px',border:`2px dashed ${'#aa44ff'}66`,borderRadius:6,cursor:'pointer',background:decompFile?'#aa44ff18':th.bgP,transition:'all .1s'}}>
+                <span style={{fontSize:22}}>🎵</span>
+                <span style={{fontSize:11,fontWeight:700,color:'#aa44ff'}}>{decompFile?decompFile.name:'Nahraj audio súbor'}</span>
+                <span style={{fontSize:9,color:th.txD}}>WAV, MP3, OGG, FLAC, M4A, AAC, WebM</span>
+                <input type="file" accept="audio/*" style={{display:'none'}} onChange={e=>setDecompFile(e.target.files?.[0]||null)}/>
+              </label>
+              {samples.length>0&&<div style={{flex:1,minWidth:160,display:'flex',flexDirection:'column',gap:4,padding:'8px',background:th.bgP,borderRadius:6,border:`1px solid ${th.bd}`}}>
+                <div style={{fontSize:9,fontWeight:700,color:th.txD,letterSpacing:1,marginBottom:4}}>ALEBO Z KNIŽNICE</div>
+                {samples.slice(0,6).map((s,i)=>(
+                  <div key={i} onClick={async()=>{const ctx=getCtx();const wav=bufToWav(s.buffer);const ab=await wav.arrayBuffer();const f=new File([ab],s.name+'.wav',{type:'audio/wav'});setDecompFile(f);}} style={{padding:'4px 8px',borderRadius:4,cursor:'pointer',background:th.bgL,fontSize:10,display:'flex',alignItems:'center',gap:6,border:`1px solid ${decompFile?.name===s.name+'.wav'?s.color||'#aa44ff':th.bd}`}}>
+                    <div style={{width:6,height:6,borderRadius:'50%',background:s.color||th.ac,flexShrink:0}}/>
+                    <span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{s.name}</span>
+                    <span style={{fontSize:8,color:th.txD,marginLeft:'auto'}}>{ft(s.info.duration)}</span>
+                  </div>
+                ))}
+              </div>}
+            </div>
+          )}
+
+          {/* Start button */}
+          {!decompLoading&&!decompResult&&(
+            <button disabled={!decompFile} onClick={async()=>{
+              if(!decompFile)return;
+              setDecompLoading(true);setDecompResult(null);setDecompStep('Pripravujem...');
+              try{
+                const fd=new FormData();
+                fd.append('audio',decompFile);
+                fd.append('mode',decompMode);
+                if(decompMode==='zoom'){fd.append('target_instrument',zoomTarget);fd.append('fragment_start',zoomStart);fd.append('fragment_end',zoomEnd);}
+                const resp=await fetch(`${BASE}/api/decompose`,{method:'POST',body:fd});
+                if(!resp.body)throw new Error('No response body');
+                const reader=resp.body.getReader();const dec=new TextDecoder();
+                while(true){
+                  const{done,value}=await reader.read();if(done)break;
+                  const txt=dec.decode(value);
+                  for(const line of txt.split('\n')){
+                    if(!line.startsWith('data: '))continue;
+                    try{const ev=JSON.parse(line.slice(6));
+                      if(ev.step==='error'){setDecompStep('✗ '+ev.message);setDecompLoading(false);return;}
+                      if(ev.step==='done'){setDecompResult(ev.data);setDecompLoading(false);setDecompStep('');return;}
+                      if(ev.message)setDecompStep(ev.message);
+                    }catch{}
+                  }
+                }
+              }catch(e:any){setDecompStep('✗ '+e.message);setDecompLoading(false);}
+            }} style={{...b1(true,'#aa44ff',th),padding:'10px 20px',fontWeight:800,fontSize:12,opacity:decompFile?1:.45}}>
+              ▶ Spustiť dekompozíciu
+            </button>
+          )}
+
+          {/* Loading state */}
+          {decompLoading&&(
+            <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:12,padding:'32px 0'}}>
+              <div style={{fontSize:24}}>⬡</div>
+              <div style={{fontSize:13,fontWeight:700,color:'#aa44ff'}}>{decompStep||'Spracovávam...'}</div>
+              <div style={{fontSize:10,color:th.txD}}>Môže trvať 1–5 minút podľa dĺžky nahrávky</div>
+              <div style={{display:'flex',gap:4}}>{[0,1,2,3].map(i=><div key={i} style={{width:8,height:8,borderRadius:'50%',background:'#aa44ff',opacity:.3+.175*i,animation:'none'}}/>)}</div>
+            </div>
+          )}
+
+          {/* Results */}
+          {decompResult&&(
+            <div style={{display:'flex',flexDirection:'column',gap:12}}>
+              {/* Smart Preview */}
+              {decompResult.smart_preview&&(
+                <div style={{padding:'10px 12px',background:th.bgP,borderRadius:6,border:`1px solid ${'#aa44ff'}44`}}>
+                  <div style={{fontSize:11,fontWeight:700,color:'#aa44ff',marginBottom:6}}>Smart Preview</div>
+                  <div style={{display:'flex',gap:12,flexWrap:'wrap',fontSize:10}}>
+                    {decompResult.smart_preview.genre&&<span style={{color:th.ac}}>🎵 {decompResult.smart_preview.genre}</span>}
+                    {decompResult.smart_preview.bpm&&<span style={{color:th.ac2}}>♩ {decompResult.smart_preview.bpm} BPM</span>}
+                    {decompResult.smart_preview.key&&<span style={{color:th.ac3}}>🎹 {decompResult.smart_preview.key}</span>}
+                    <span style={{color:th.txD}}>{decompResult.smart_preview.complexity} complexity</span>
+                  </div>
+                  {decompResult.smart_preview.summary&&<div style={{marginTop:6,fontSize:11,color:th.tx,lineHeight:1.5}}>{decompResult.smart_preview.summary}</div>}
+                  {decompResult.smart_preview.notable_elements?.length>0&&(
+                    <div style={{marginTop:6,display:'flex',gap:4,flexWrap:'wrap'}}>
+                      {decompResult.smart_preview.notable_elements.map((el:string,i:number)=>(
+                        <span key={i} style={{fontSize:9,padding:'2px 6px',background:'#aa44ff22',color:'#aa44ff',borderRadius:3}}>{el}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Stems */}
+              <div style={{fontSize:11,fontWeight:700,color:th.txD,letterSpacing:1}}>STOPY ({decompResult.stems?.length??0})</div>
+              {(decompResult.stems||[]).map((stem:any,i:number)=>{
+                const layer=decompResult.layers?.find((l:any)=>l.stem_id===stem.stem_id);
+                const conf=layer?.confidence??null;
+                const confCol=conf==null?th.txD:conf>=.8?'#44ff88':conf>=.6?'#ffcc00':'#ff4455';
+                return(
+                <div key={i} style={{padding:'10px 12px',background:th.bgP,borderRadius:6,border:`1px solid ${th.bd}`}}>
+                  <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',marginBottom:layer?6:0}}>
+                    <span style={{fontSize:12,fontWeight:700,color:th.ac}}>{layer?.layer_name||stem.demucs_label}</span>
+                    {conf!=null&&<span style={{fontSize:9,padding:'2px 6px',background:confCol+'22',color:confCol,borderRadius:3,fontWeight:700}}>{Math.round(conf*100)}%</span>}
+                    <span style={{fontSize:9,color:th.txD,marginLeft:'auto'}}>{stem.filename}</span>
+                    <button onClick={async()=>{
+                      try{const r=await fetch(stem.file_url);const ab=await r.arrayBuffer();
+                        const ctx=getCtx();const buf=await ctx.decodeAudioData(ab);
+                        addSample(layer?.layer_name||stem.demucs_label,buf,'#aa44ff');
+                        setLog(p=>[...p,`✓ "${layer?.layer_name||stem.demucs_label}" pridaný do knižnice`]);
+                      }catch(e:any){setLog(p=>[...p,`✗ Chyba: ${e.message}`]);}
+                    }} style={{...sb(false,'#aa44ff',th),fontSize:9,padding:'2px 8px'}}>+ Library</button>
+                    <a href={stem.file_url} download={stem.filename} style={{...sb(false,null,th),fontSize:9,padding:'2px 8px',textDecoration:'none'}}>↓ WAV</a>
+                  </div>
+                  {layer&&<>
+                    {layer.instruments?.length>0&&<div style={{fontSize:10,color:th.txD,marginBottom:3}}>{layer.instruments.join(' · ')}</div>}
+                    {layer.description&&<div style={{fontSize:10,color:th.tx,marginBottom:3,lineHeight:1.4}}>{layer.description}</div>}
+                    {layer.effects_detected?.length>0&&<div style={{display:'flex',gap:3,flexWrap:'wrap'}}>
+                      {layer.effects_detected.map((ef:string,j:number)=><span key={j} style={{fontSize:8,padding:'1px 5px',background:th.bgL,color:th.ac2,borderRadius:3}}>{ef}</span>)}
+                    </div>}
+                  </>}
+                </div>);
+              })}
+
+              {/* Escalation suggestions */}
+              {(decompResult.escalation_suggestions||[]).map((esc:any,i:number)=>(
+                <div key={i} style={{padding:'8px 12px',background:'#ff445520',border:'1px solid #ff445544',borderRadius:6,fontSize:10}}>
+                  <span style={{color:'#ff4455',fontWeight:700}}>⚠ {esc.layer_name}</span>
+                  <span style={{color:th.txD,marginLeft:8}}>{esc.message}</span>
+                  <button onClick={()=>{setDecompMode('zoom');setZoomStart(esc.suggested_range?.start||'0:00');setZoomEnd(esc.suggested_range?.end||'0:30');setDecompResult(null);}} style={{...sb(false,'#ffcc00',th),fontSize:9,padding:'2px 8px',marginLeft:8}}>Deep Zoom</button>
+                </div>
+              ))}
+
+              <button onClick={()=>{setDecompResult(null);setDecompStep('');}} style={{...sb(false,null,th),padding:'6px 14px',alignSelf:'flex-start'}}>← Nová dekompozícia</button>
+            </div>
+          )}
+        </div>
+      </div>
+    )}
 
     {/* Rename modal */}
     {renameTarget&&(
