@@ -311,6 +311,10 @@ export default function App(){
   const[seqPreviewBuf,setSeqPreviewBuf]=useState<AudioBuffer|null>(null);
   const seqCvR=useRef<HTMLCanvasElement|null>(null);
   let clipIdR=useRef(0);
+  const[undoStack,setUndoStack]=useState<any[]>([]);
+  const[redoStack,setRedoStack]=useState<any[]>([]);
+  const[abSnap,setAbSnap]=useState<{before:any,after:any,showing:'A'|'B'}|null>(null);
+  const[abPending,setAbPending]=useState<any>(null);
   // Decompositor state
   const[showDecompose,setShowDecompose]=useState(false);
   const[decompMode,setDecompMode]=useState<'track'|'stem'|'zoom'>('track');
@@ -446,6 +450,15 @@ export default function App(){
   const dropToSeq=async(files: File[])=>{const ctx=getCtx();let base=smpRef.current.length,i=0;for(const f of files){if(!f.type.startsWith('audio/')&&!f.name.match(/\.(wav|mp3|ogg|flac|m4a|aac|webm)$/i))continue;try{const ab=await f.arrayBuffer();const buf=await ctx.decodeAudioData(ab);const name=f.name.replace(/\.[^.]+$/,'');addSample(name,buf);const idx=base+i;setChannels((cs:any[])=>[...cs,{...MKCH(scR.current),sampleIdx:idx}]);i++;}catch(e){}}};
 
   // AI
+  const snapshot=useCallback(()=>({samples:samples.slice(),patterns:patterns.map((p:any[])=>p.slice()),bpm,swing,stepCount,curPat,sel}),[samples,patterns,bpm,swing,stepCount,curPat,sel]);
+  const restoreSnap=useCallback((s:any)=>{if(!s)return;setSamples(s.samples.slice());setPatterns(s.patterns.map((p:any[])=>p.slice()));setBpm(s.bpm);setSwing(s.swing);setStepCount(s.stepCount);scR.current=s.stepCount;setCurPat(s.curPat);setSel(s.sel);},[]);
+  const undo=useCallback(()=>{if(!undoStack.length)return;const snap=undoStack[undoStack.length-1];setRedoStack(r=>[...r,snapshot()]);setUndoStack(p=>p.slice(0,-1));restoreSnap(snap);setAbSnap(null);setLog(p=>[...p,'◶ Undo']);},[undoStack,snapshot,restoreSnap]);
+  const redo=useCallback(()=>{if(!redoStack.length)return;const snap=redoStack[redoStack.length-1];setUndoStack(p=>[...p,snapshot()]);setRedoStack(r=>r.slice(0,-1));restoreSnap(snap);setAbSnap(null);setLog(p=>[...p,'◷ Redo']);},[redoStack,snapshot,restoreSnap]);
+  const abToggle=useCallback(()=>{if(!abSnap)return;if(abSnap.showing==='B'){restoreSnap(abSnap.before);setAbSnap({...abSnap,showing:'A'});}else{restoreSnap(abSnap.after);setAbSnap({...abSnap,showing:'B'});}},[abSnap,restoreSnap]);
+  const abKeep=useCallback(()=>{if(abSnap)restoreSnap(abSnap.after);setAbSnap(null);},[abSnap,restoreSnap]);
+  const abRevert=useCallback(()=>{if(abSnap){restoreSnap(abSnap.before);setUndoStack(p=>p.slice(0,-1));setRedoStack([]);}setAbSnap(null);},[abSnap,restoreSnap]);
+  useEffect(()=>{if(abPending){setAbSnap({before:abPending,after:snapshot(),showing:'B'});setAbPending(null);}},[abPending,snapshot]);
+
   const execCmds=useCallback(async(cmds: any[],sa: any[])=>{const ctx=getCtx();let ci=sel;let arr=[...sa];let chs=[...channels];let tb=[...trackBlocks];let tbDirty=false;let lg:string[]=[];let bp=bpm;let sw=swing;
     for(const cmd of cmds){try{
       if(cmd.op==='select'){ci=cmd.sample;setSel(ci);}
