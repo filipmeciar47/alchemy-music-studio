@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { analyze } from "./audioAnalysis";
+import { repairOrFallback } from "./seqValidator";
 
 const C={bg:"#1a1a2e",bgD:"#0e0e1a",bgP:"#14142a",bgL:"#222244",ac:"#ff6b35",ac2:"#00d4aa",ac3:"#7b68ee",tx:"#e0e0e0",txD:"#7777aa",bd:"#252545",wf:"#00d4aa",wfBg:"#0a0a15",red:"#ff4455",grn:"#44ff88"};
 const TK={bg:"#0d0d0d",bgD:"#080808",bgP:"#111111",bgL:"#1a1a1a",ac:"#00ffaa",ac2:"#ff0066",ac3:"#ffcc00",tx:"#cccccc",txD:"#555555",bd:"#222222",wf:"#00ffaa",wfBg:"#050505",red:"#ff0044",grn:"#00ff66"};
@@ -78,7 +79,7 @@ function bouncePat(chs: any[],samples: any[],bpm: number,steps: number,swing: nu
     const lG=ch.vol*Math.cos((ch.pan+1)*Math.PI/4),rG=ch.vol*Math.sin((ch.pan+1)*Math.PI/4);
     const d=buf.getChannelData(0),d2=buf.numberOfChannels>1?buf.getChannelData(1):d;
     const rate=ch.pitch||1;const useSC=ch.sidechain&&kickCh>=0&&ci!==kickCh;
-    for(let st=0;st<steps;st++){if(!ch.steps[st])continue;
+    for(let st=0;st<steps;st++){if(!ch.steps?.[st])continue;
       const vel=(ch.velocities?.[st]??80)/127;const ratch=ch.ratchets?.[st]||1;
       const swOff=st%2===1?(swing-50)/100*stepDur:0;
       const fAuto=ch.filterAuto?.[st]??1;
@@ -194,6 +195,25 @@ const KIT_PATTERNS: {s:number,steps:number[],ratchets?:number[],isKick?:boolean,
 
 const MKCH=(sc: number)=>({sampleIdx:0,steps:new Array(sc).fill(false),velocities:new Array(sc).fill(80),ratchets:new Array(sc).fill(1),filterAuto:new Array(sc).fill(1),vol:.8,pan:0,pitch:1,mute:false,solo:false,eqL:1,eqM:1,eqH:1,sidechain:false,isKick:false,truncate:false,playMark:false});
 
+const FX_DESC:Record<string,string>={
+  gain:'Hlasitosť / zosilnenie. 1 = originál, >1 hlasnejší, <1 tichší.',
+  saturation:'Saturácia / Drive: pridáva harmonické skreslenie a teplo. Nízke = warm analog, vysoké = agresívne distortion.',
+  lpFreq:'Low-pass filter: orezáva vysoké frekvencie. Nižšia hodnota = tmavší, dunivejší zvuk. OFF = bez filtra.',
+  hpFreq:'High-pass filter: orezáva basové frekvencie. Vyššia hodnota = tenší, vzdušnejší zvuk. OFF = bez filtra.',
+  fadeIn:'Fade In: postupné nájdenie zvuku od ticha na začiatku stopy (v sekundách).',
+  fadeOut:'Fade Out: postupné stíšenie zvuku na konci stopy (v sekundách).',
+  delay:'Delay / Echo: opakovanie zvuku s časovým odstupom. Mixuje suchý a mokrý signál.',
+  delayTime:'Echo čas: dĺžka oneskorenia medzi originálom a echom (v sekundách).',
+  compress:'Kompresor: vyrovnáva dynamiku — stlačí hlasné časti, čím sa celok zdá vyrovnanejší a silnejší.',
+  loop:'Loop: opakuje vzorku N-krát za sebou a spojí ich do jedného buffra.',
+  reverb:'Reverb: simuluje priestorový dozvuk (miestnosť, hala). Viac = väčší priestor.',
+  reverbDecay:'Reverb dĺžka: ako dlho doznieva dozvuk (v sekundách).',
+  chorus:'Chorus / Flanger: zdvojuje zvuk s malým posunom výšky a časovým oneskorením — plnší, pohyblivý zvuk.',
+  chorusRate:'Rýchlosť chorusu: frekvencia modulácie zdvojeného signálu (Hz).',
+  bitCrush:'Bitcrusher: znižuje digitálne rozlíšenie zvuku — lo-fi, crunch, retro 8-bit charakter.',
+  speed:'Rýchlosť (Playback Rate): mení tempo prehrávania. <1 = pomalšie + nižší tón, >1 = rýchlejšie + vyšší tón.',
+};
+
 const SYSP_CL=`ROLA: AI producent. Slovenčina. STRUČNE - max 2 vety v message.
 FORMÁT: VŽDY zavolaj funkciu execute_audio_operations s {message:"krátka odpoveď", operations:[{op:"..."}]}. Nepíš voľný text ani markdown.
 
@@ -208,7 +228,25 @@ LIVE MIXING: na stíšenie/zhlasnenie stopy použi set_channel(volume), mute(tru
 ANALÝZA: pri každej vzorke v kontexte máš ~BPM, tóninu (napr. Am = A mol), LUFS (hlasitosť) a hits (počet úderov). Využi ich: zlaď set_bpm podľa vzoriek, vyrovnaj príliš tiché/hlasné vzorky cez volume/gain, kicku nechaj priestor.
 
 split: rozdelí vzorku na dve nové (A+B) v danom čase. merge: spojí viaceré vzorky za seba, gaps=medzery v sekundách.
-DÔLEŽITÉ: Ak nemáš vzorky, povedz nech nahrajú. Ak máš, VŽDY generuj commands. Neopisuj kód, nepíš návody. KONAJ.`;
+DÔLEŽITÉ: Ak nemáš vzorky, povedz nech nahrajú. Ak máš, VŽDY generuj commands. Neopisuj kód, nepíš návody. KONAJ.
+
+SEQ ŠABLÓNY (16 krokov, použi ako základ):
+kick 4/4:    [1,0,0,0,1,0,0,0,1,0,0,0,1,0,0,0] isKick:true vel:110
+snare/clap:  [0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0] vel:95
+hihat off:   [0,0,1,0,0,0,1,0,0,0,1,0,0,0,1,0] vel:70
+hihat 8ths:  [1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0] vel:60
+bass tekno:  [1,0,0,0,0,1,0,0,1,0,0,0,0,1,0,0] sidechain:true
+bass reggae: [1,0,0,1,0,0,0,1,0,0,1,0,0,0,1,0] sidechain:true
+perc:        [0,1,0,0,0,1,0,0,0,1,0,0,0,0,1,0] vel:75
+
+SEQ PRAVIDLÁ — POVINNÉ: MAX 5 kanálov pre základný beat. KAŽDÝ kanál musí mať MIN 2 aktívne kroky — ak by mal menej, vynechaj ho úplne. Bass VŽDY sidechain:true na kick. Kick dostane isKick:true. NIKDY nepridávaj kanál kde sú všetky kroky 0/false.
+
+INTERAKCIE (zo knowledge base):
+BASS-KICK: tekno→bass na 3,7,10,14 (nie 1,5,9,13 kde hrá kick). dub_techno→bass na 3,11,15 dlhé noty. hardtek→unison kick+bass OK ak sidechain.
+HAT-KICK: hat NESMIE byť len na 1,5,9,13 (zdvojenie kicku). tekno→off-beat 2,4,6,8,10,12,14,16. dub_techno→quarter 3,7,11,15.
+VELOCITY: kick(9)≥snare(9)≥bass(7)≥hat(6)≥perc(4). NIKDY všetky kanály na velocity 9.
+ANTI-VZORY: bass+kick na viacerých krokoch bez sidechain=blatistý mix. bass na 16 krokoch=nie bass. hat=kick pattern=zlé. snare na 1 alebo 9=kolízia.
+FINGERPRINTS: tekno=kick 1,5,9,13+off-beat hat+bass mimo kicku. hard_tekno=kick+predkrok 4+16th hat. dub_techno=kick 1,9,13+priestor+bass 3,11,15. acidcore=kick 1,5,9,13+acid_bass cez celý takt+distortion. hardtek=rolling kick 1,3,5,9,11,13+tribal+unison bass.`;
 
 const SYSP_TK=`ROLA: AI tekno producent (free tekno / hardtek). Slovenčina. STRUČNE - max 2 vety.
 FORMÁT: VŽDY zavolaj funkciu execute_audio_operations s {message:"krátka odpoveď", operations:[{op:"..."}]}. Nepíš voľný text ani markdown.
@@ -227,7 +265,28 @@ STOPY: clear_channel(channel), remove_channel(channel), duplicate_channel(channe
 ARANŽMÁN/MIX: add_to_track(times,name)=bounce pattern do skladby (timeline) times×; add_sample_to_track(sample,dir,times)=pridaj konkrétnu vzorku do skladby (dir:'h'=za seba na aktívnu stopu / 'v'=nová paralelná stopa); save_to_library(target,name)=ulož výsledok do knižnice (target:'pattern'=aktuálny pattern default / 'track'=celá skladba; bez name – AIoutput1, AIoutput2…); auto_mix=vyrovná hlasitosti stôp podľa LUFS, kicku dá priestor + sidechain na bass; match_reference(source)=zladí BPM a mix podľa referenčnej vzorky #source. Stavba skladby: rob patterny (set_pattern, copy_pattern) a reťaz ich cez add_to_track (intro/build/drop/break).
 ULOŽENIE: keď zložíš slučku/beat (strihanie, skladanie, úprava stôp), na záver ho ulož cez save_to_library (default AIoutputN). Vytvorené vzorky pridaj do skladby cez add_sample_to_track alebo do sekvencera cez add_channel.
 
-PRAVIDLÁ (FREE TEKNO / HARDTEK): BPM 150-185. Skreslený, rýchly kick — nie len 4-on-floor, ale rolling/offbeat kicky s ratchet 2-4 pre rýchle rolly. Agresívny, skreslený bassline (sidechain na kick). Hihat offset. Swing tesný 50-56. Energia a tvrdosť. VŽDY generuj commands, neopisuj. KONAJ.`;
+PRAVIDLÁ (FREE TEKNO / HARDTEK): BPM 150-185. Skreslený, rýchly kick — nie len 4-on-floor, ale rolling/offbeat kicky s ratchet 2-4 pre rýchle rolly. Agresívny, skreslený bassline (sidechain na kick). Hihat offset. Swing tesný 50-56. Energia a tvrdosť. VŽDY generuj commands, neopisuj. KONAJ.
+
+SEQ ŠABLÓNY (16 krokov, použi ako základ, varíruj ±2 kroky):
+TEKNO kick 4/4:     [1,0,0,0,1,0,0,0,1,0,0,0,1,0,0,0] isKick:true vel:110
+TEKNO kick rolling: [1,0,0,1,0,0,1,0,0,1,0,0,1,0,0,0] isKick:true ratchets:[2,1,1,2,1,1,2,1,1,2,1,1,2,1,1,1]
+TEKNO snare:        [0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0] vel:95
+TEKNO hihat off:    [0,0,1,0,0,0,1,0,0,0,1,0,0,0,1,0] vel:65
+TEKNO hihat 8ths:   [1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0] vel:55
+TEKNO bass:         [1,0,0,0,0,1,0,0,1,0,0,0,0,1,0,0] sidechain:true saturation:0.4
+HARDTEK kick:       [1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0] isKick:true ratchets:[2,1,2,1,2,1,2,1,2,1,2,1,2,1,2,1] vel:115
+HARDTEK bass:       [1,0,0,1,0,0,1,0,1,0,0,1,0,0,1,0] sidechain:true saturation:0.6
+ACIDCORE 303:       [1,1,0,1,1,0,1,0,1,1,0,1,0,1,1,0] sidechain:true lpFreq:900 saturation:0.7
+ACIDCORE kick:      [1,0,0,0,1,0,1,0,1,0,0,0,1,0,1,0] isKick:true vel:120
+
+SEQ PRAVIDLÁ — POVINNÉ: MAX 5 kanálov pre základný beat. KAŽDÝ kanál min 2 aktívne kroky — ak by mal menej, vynechaj ho. Bass VŽDY sidechain:true. Kick VŽDY isKick:true. NIKDY nepridávaj kanál kde všetky kroky = 0/false. Kick a bass nehrajú na rovnakých krokoch (bass hrá medzi kickmi). Najprv postav rytmický základ (kick+snare+hihat), POTOM pridaj bass.
+
+INTERAKCIE (knowledge base):
+BASS-KICK: tekno→bass na 3,7,10,14. hard_tekno→bass na 3,7,11,15. dub_techno→bass na 3,11,15 dlhé noty. hardtek/acidcore→unison OK ak sidechain:true. Bass koliduje s kickom MAX 2× za bar.
+HAT: hat NESMIE byť len na 1,5,9,13 (to je kick). tekno off-beat=2,4,6,8,10,12,14,16. dub_techno quarter=3,7,11,15. rolling kick+on-beat hat=kaša.
+VELOCITY: kick(9)≥snare(9)≥bass(7-8)≥hat(5-6)≥perc(4-5). NIKDY všetky na 9.
+ANTI-VZORY (zakázané): bass+kick 1,5,9,13 bez sidechain. bass>6 krokov. snare na 1 alebo 9. hat=kick pattern. bass hustejší ako hat. open hat+snare na rovnakom kroku.
+FINGERPRINTS: tekno=4floor kick+offbeat hat+bass mimo kick. hard_tekno=kick+predkrok 4+16th hat+sat bass. dub_techno=kick 1,9,13+priestor+bass 3,11,15. acidcore=4floor+acid_bass celý takt. hardtek=rolling kick+tribal perc+kick-bass unison.`;
 
 function euclidSteps(n: number,k: number,rot: number): boolean[]{
   n=Math.max(1,Math.floor(n));k=Math.max(0,Math.min(n,Math.floor(k||0)));
@@ -294,6 +353,7 @@ export default function App(){
   const[trackPlaying,setTrackPlaying]=useState(false);
   const[trackSel,setTrackSel]=useState<number|null>(null);
   const[trackBlockFx,setTrackBlockFx]=useState({...FX0});
+  const[trackCropRange,setTrackCropRange]=useState<[number,number]|null>(null);
   const[activeLayer,setActiveLayer]=useState(0);
   const[layerVols,setLayerVols]=useState<{[k:number]:number}>({0:1});
   const trackIdR=useRef(0);
@@ -408,7 +468,7 @@ export default function App(){
     // Live scheduler — reads latest state from refs each tick so volume/pan/EQ/mute/solo/BPM apply in real time
     const sched=()=>{const chs=chRef.current,smp=smpRef.current,bp=bpmRef.current,sw=swRef.current,sc=Math.max(1,scR.current|0);const stepDur=60/bp/4;const solo=chs.some((c:any)=>c.solo);
       while(nstR.current<ctx.currentTime+.1){const st=csR.current%sc;setCurStep(st);const swOff=st%2===1?(sw-50)/100*stepDur:0;
-      for(const ch of chs){if(ch.mute||(solo&&!ch.solo)||!ch.steps[st])continue;const s=smp[ch.sampleIdx];if(!s)continue;
+      for(const ch of chs){if(ch.mute||(solo&&!ch.solo)||!ch.steps?.[st])continue;const s=smp[ch.sampleIdx];if(!s)continue;
         const ratch=ch.ratchets?.[st]||1;const vel=(ch.velocities?.[st]??80)/127;
         for(let r=0;r<ratch;r++){const src=ctx.createBufferSource();
           // Truncate long samples to step boundary to prevent overlap
@@ -460,7 +520,24 @@ export default function App(){
   useEffect(()=>{if(abPending){setAbSnap({before:abPending,after:snapshot(),showing:'B'});setAbPending(null);}},[abPending,snapshot]);
 
   const execCmds=useCallback(async(cmds: any[],sa: any[])=>{const ctx=getCtx();let ci=sel;let arr=[...sa];let chs=[...channels];let tb=[...trackBlocks];let tbDirty=false;let lg:string[]=[];let bp=bpm;let sw=swing;
-    for(const cmd of cmds){try{
+
+    // SEQ batch validator — runs before the main loop
+    const addChBatch=cmds.filter((c:any)=>c.op==='add_channel');
+    let processedCmds=cmds;
+    if(addChBatch.length>0){
+      const detectedGenre=bp>=170?'acidcore':bp>=158?'hardtek':bp>=142?'hard_tekno':bp>=128?'tekno':bp>=118?'dub_techno':bp<=90?'reggae':'tekno';
+      const valResult=repairOrFallback(addChBatch,detectedGenre,0);
+      valResult.issues.filter((i:any)=>i.severity==='error').forEach((i:any)=>lg.push(`⚠ SEQ: ${i.message}`));
+      if(valResult.usedFallback)lg.push(`⚠ SEQ: použitý fallback template (${detectedGenre})`);
+      const repaired=[...valResult.repairedCmds];let ri=0;
+      processedCmds=cmds.flatMap((c:any)=>{
+        if(c.op!=='add_channel')return[c];
+        return ri<repaired.length?[repaired[ri++]]:[];
+      });
+      if(ri<repaired.length)processedCmds=[...processedCmds,...repaired.slice(ri)];
+    }
+
+    for(const cmd of processedCmds){try{
       if(cmd.op==='select'){ci=cmd.sample;setSel(ci);}
       else if(cmd.op==='trim_silence'&&ci!=null&&arr[ci]){const b=trimSil(arr[ci].buffer,ctx);arr[ci]={...arr[ci],buffer:b,info:analyze(b)};lg.push(`▸ Trim`);}
       else if(cmd.op==='crop_time'&&ci!=null&&arr[ci]){const b=cropT(arr[ci].buffer,cmd.start||0,cmd.end||arr[ci].buffer.duration,ctx);arr[ci]={...arr[ci],buffer:b,info:analyze(b)};lg.push(`▸ Crop`);}
@@ -469,7 +546,7 @@ export default function App(){
       else if(cmd.op==='rename'&&ci!=null){arr[ci]={...arr[ci],name:cmd.name};lg.push(`▸ Rename`);}
       else if(cmd.op==='duplicate'&&ci!=null&&arr[ci]){arr.push({...arr[ci],name:cmd.newName||arr[ci].name+'_dup'});lg.push(`▸ Dup #${arr.length-1}`);}
       else if(cmd.op==='create_from'){const si2=cmd.source??ci;if(si2!=null&&arr[si2]){let b=arr[si2].buffer;for(const op of(cmd.operations||[])){if(op.op==='trim_silence')b=trimSil(b,ctx);else if(op.op==='crop_time')b=cropT(b,op.start||0,op.end||b.duration,ctx);else if(op.op==='loop')b=mkLoop(b,op.times||4,op.crossfade||.02,ctx);else if(op.op==='effects')b=applyFx(b,{gain:op.params?.gain??1,reverse:!!op.params?.reverse,normalize:!!op.params?.normalize,fadeIn:op.params?.fadeIn||0,fadeOut:op.params?.fadeOut||0,lpFreq:op.params?.lpFreq??20000,hpFreq:op.params?.hpFreq??20,saturation:op.params?.saturation||0,delay:op.params?.delay||0,delayTime:op.params?.delayTime||.25,delayFb:op.params?.delayFb||.3,compress:op.params?.compress||0},ctx);}arr.push({name:cmd.newName||`new_${arr.length}`,buffer:b,info:analyze(b),original:b});lg.push(`▸ Nová "${cmd.newName}" #${arr.length-1}`);}}
-      else if(cmd.op==='add_channel'){const si2=cmd.sample??ci;if(si2!=null){const c=MKCH(stepCount);c.sampleIdx=si2;if(cmd.steps)c.steps=cmd.steps.map((v:any)=>!!v);if(cmd.velocities)c.velocities=cmd.velocities;if(cmd.ratchets)c.ratchets=cmd.ratchets;if(cmd.volume!=null)c.vol=cmd.volume;if(cmd.pan!=null)c.pan=cmd.pan;if(cmd.pitch!=null)c.pitch=cmd.pitch;if(cmd.eqLow!=null)c.eqL=cmd.eqLow;if(cmd.eqMid!=null)c.eqM=cmd.eqMid;if(cmd.eqHigh!=null)c.eqH=cmd.eqHigh;if(cmd.sidechain!=null)c.sidechain=cmd.sidechain;if(cmd.isKick!=null)c.isKick=cmd.isKick;if(cmd.filterAuto)c.filterAuto=cmd.filterAuto;chs.push(c);lg.push(`▸ Ch: "${arr[si2]?.name}"`);}}
+      else if(cmd.op==='add_channel'){const si2=cmd.sample??ci;if(si2!=null){const c=MKCH(stepCount);c.sampleIdx=si2;if(cmd.steps)c.steps=cmd.steps.map((v:any)=>!!v);if(cmd.velocities)c.velocities=cmd.velocities;if(cmd.ratchets)c.ratchets=cmd.ratchets;if(cmd.volume!=null)c.vol=cmd.volume;if(cmd.pan!=null)c.pan=cmd.pan;if(cmd.pitch!=null)c.pitch=cmd.pitch;if(cmd.eqLow!=null)c.eqL=cmd.eqLow;if(cmd.eqMid!=null)c.eqM=cmd.eqMid;if(cmd.eqHigh!=null)c.eqH=cmd.eqHigh;if(cmd.sidechain!=null)c.sidechain=cmd.sidechain;if(cmd.isKick!=null)c.isKick=cmd.isKick;if(cmd.filterAuto)c.filterAuto=cmd.filterAuto;const activeSteps=(c.steps||[]).filter(Boolean).length;if(activeSteps<2){lg.push(`✗ Ch "${arr[si2]?.name}" preskočený — menej ako 2 aktívne kroky`);}else{chs.push(c);lg.push(`▸ Ch: "${arr[si2]?.name}"`);}}}
       else if(cmd.op==='set_channel'&&cmd.channel!=null&&chs[cmd.channel]){const c={...chs[cmd.channel]};if(cmd.volume!=null)c.vol=cmd.volume;if(cmd.pan!=null)c.pan=cmd.pan;if(cmd.pitch!=null)c.pitch=cmd.pitch;if(cmd.steps)c.steps=cmd.steps.map((v:any)=>!!v);if(cmd.velocities)c.velocities=cmd.velocities;if(cmd.ratchets)c.ratchets=cmd.ratchets;if(cmd.eqLow!=null)c.eqL=cmd.eqLow;if(cmd.eqMid!=null)c.eqM=cmd.eqMid;if(cmd.eqHigh!=null)c.eqH=cmd.eqHigh;if(cmd.mute!=null)c.mute=cmd.mute;if(cmd.solo!=null)c.solo=cmd.solo;if(cmd.sidechain!=null)c.sidechain=cmd.sidechain;if(cmd.isKick!=null)c.isKick=cmd.isKick;if(cmd.filterAuto)c.filterAuto=cmd.filterAuto;chs[cmd.channel]=c;lg.push(`▸ Ch${cmd.channel} upd`);}
       else if(cmd.op==='shift_channel'&&cmd.channel!=null&&chs[cmd.channel]){const c={...chs[cmd.channel]};const n=Math.round(cmd.steps||0);const L=c.steps.length;const rot=(a:any[])=>a&&a.length?a.map((_,i)=>a[((i-n)%L+L)%L]):a;c.steps=rot(c.steps);c.velocities=rot(c.velocities);c.ratchets=rot(c.ratchets);c.filterAuto=rot(c.filterAuto);chs[cmd.channel]=c;lg.push(`▸ Posun Ch${cmd.channel} ${n>0?'+':''}${n}`);}
       else if(cmd.op==='clear_channel'&&cmd.channel!=null&&chs[cmd.channel]){const c={...chs[cmd.channel]};c.steps=c.steps.map(()=>false);chs[cmd.channel]=c;lg.push(`▸ Vyčisti Ch${cmd.channel}`);}
@@ -482,7 +559,7 @@ export default function App(){
       else if(cmd.op==='match_reference'){const si2=cmd.source??cmd.sample??ci;const ref=arr[si2];if(ref&&ref.info){const rb=ref.info.bpm;if(Number.isFinite(rb)&&rb>=20&&rb<=400){bp=Math.round(rb);setBpm(bp);}const tgt=Number.isFinite(ref.info.lufs)?ref.info.lufs:-23;if(chs.length){const r=autoBalance(chs,arr,tgt);chs=r.chs;}const ks=ref.info.key?` ${ref.info.key}${ref.info.scale==='minor'?'m':''}`:'';lg.push(`▸ Referencia "${ref.name}" → BPM ${bp},${ks?` tónina${ks},`:''} hlasitosť ${tgt.toFixed(1)} LUFS`);}else lg.push(`✗ match_reference: vzorka #${si2} neexistuje`);}
       else if(cmd.op==='add_to_track'){if(chs.length){const buf=bouncePat(chs,arr,bp,stepCount,sw,ctx);const times=Math.max(1,Math.min(16,Math.round(cmd.times||1)));const nm=cmd.name||`Pat${curPat}_${bp}`;for(let t=0;t<times;t++){const endSec=tb.filter(b=>b.layer===activeLayer).reduce((mx,b)=>Math.max(mx,b.startSec+b.buffer.duration),0);trackIdR.current++;tb.push({id:trackIdR.current,name:nm,buffer:buf,startSec:Number.isFinite(endSec)?endSec:0,layer:activeLayer,vol:1,color:SWATCH[tb.length%SWATCH.length],fx:{...FX0},mute:false});}tbDirty=true;lg.push(`▸ Aranžmán: "${nm}" ${times}× → skladba`);}else lg.push(`✗ add_to_track: žiadne stopy`);}
       else if(cmd.op==='add_sample_to_track'){const si2=cmd.sample??ci;if(si2!=null&&arr[si2]){const dir=cmd.dir==='v'?'v':'h';const times=Math.max(1,Math.min(16,Math.round(cmd.times||1)));const buf=arr[si2].buffer;const nm=arr[si2].name;const targetLayer=dir==='h'?activeLayer:tb.reduce((mx,b)=>Math.max(mx,b.layer),0)+1;for(let t=0;t<times;t++){const endSec=tb.filter(b=>b.layer===targetLayer).reduce((mx,b)=>Math.max(mx,b.startSec+b.buffer.duration),0);trackIdR.current++;tb.push({id:trackIdR.current,name:nm,buffer:buf,startSec:Number.isFinite(endSec)?endSec:0,layer:targetLayer,vol:1,color:samples[si2]?.color||SWATCH[tb.length%SWATCH.length],fx:{...FX0},mute:false});}tbDirty=true;lg.push(`▸ "${nm}" ${times}× → Track${dir==='v'?` (paralelne, vrstva ${targetLayer})`:''}`);}else lg.push(`✗ add_sample_to_track: vzorka #${si2} neexistuje`);}
-      else if(cmd.op==='save_to_library'){const tgt=cmd.target==='track'?'track':'pattern';let buf:AudioBuffer|null=null;if(tgt==='track'){buf=bounceTrack(tb);}else if(chs.length){buf=bouncePat(chs,arr,bp,stepCount,sw,ctx);}if(buf){let nm=cmd.name;if(!nm){let mx=0;for(const s of arr){const m=/^AIoutput(\d+)$/.exec(s.name);if(m)mx=Math.max(mx,+m[1]);}nm=`AIoutput${mx+1}`;}arr.push({name:nm,buffer:buf,info:analyze(buf),original:buf});lg.push(`💾 Uložené do knižnice: "${nm}" (${ft(buf.duration)})`);}else lg.push(`✗ save_to_library: ${tgt==='track'?'prázdny track':'žiadne stopy'}`);}
+      else if(cmd.op==='save_to_library'){const tgt=cmd.target==='track'?'track':'pattern';let buf:AudioBuffer|null=null;if(tgt==='track'){buf=bounceTrack();}else if(chs.length){buf=bouncePat(chs,arr,bp,stepCount,sw,ctx);}if(buf){let nm=cmd.name;if(!nm){let mx=0;for(const s of arr){const m=/^AIoutput(\d+)$/.exec(s.name);if(m)mx=Math.max(mx,+m[1]);}nm=`AIoutput${mx+1}`;}arr.push({name:nm,buffer:buf,info:analyze(buf),original:buf});lg.push(`💾 Uložené do knižnice: "${nm}" (${ft(buf.duration)})`);}else lg.push(`✗ save_to_library: ${tgt==='track'?'prázdny track':'žiadne stopy'}`);}
       else if(cmd.op==='set_bpm'){const v=Math.max(20,Math.min(400,Number(cmd.bpm)||128));bp=v;setBpm(v);lg.push(`▸ BPM ${v}`);}
       else if(cmd.op==='set_swing'){const v=Math.max(50,Math.min(75,Number(cmd.swing)||50));sw=v;setSwing(v);lg.push(`▸ Swing ${v}%`);}
       else if(cmd.op==='set_pattern'){setCurPat(cmd.pattern);lg.push(`▸ Pattern ${cmd.pattern}`);}
@@ -694,7 +771,7 @@ export default function App(){
               <button onClick={()=>doBounce()} disabled={!channels.length} style={{...sb(false,th.ac2,th),fontSize:10,padding:'3px 10px'}} title="Ulož sekvenciu ako vzorku do knižnice">SEQ→Knižnica</button>
               <button onClick={()=>{const ctx=getCtx();const buf=bouncePat(channels,samples,bpm,stepCount,swing,ctx);doExport(buf,`SEQ_${bpm}bpm`);}} disabled={!channels.length} style={{...sb(false,null,th),fontSize:10,padding:'3px 10px'}} title="Exportuj sekvenciu ako WAV">Export SEQ</button>
               {channels.some((c:any)=>c.solo)&&<button onClick={()=>setChannels((p:any[])=>p.map((c:any)=>({...c,solo:false})))} style={{...sb(true,th.ac2,th),fontSize:10,padding:'3px 10px'}} title="Zruš solo — znova hrá celá sekvencia">⊘ Sólo</button>}
-              {channels.some((c:any)=>c.playMark)&&<button onClick={()=>{const marked=channels.filter((c:any)=>c.playMark);if(!marked.length)return;stopSeq();const ctx=getCtx();if(ctx.state==='suspended')ctx.resume();if(!masterGR.current){masterGR.current=ctx.createGain();masterGR.current.connect(ctx.destination);}masterGR.current.gain.value=mvR.current;csR.current=0;nstR.current=ctx.currentTime+.05;setSeqPlaying(true);const sched=()=>{const chs=chRef.current.filter((_:any,i:number)=>chRef.current[i]?.playMark);const smp=smpRef.current,bp=bpmRef.current,sw=swRef.current,sc=Math.max(1,scR.current|0);const stepDur=60/bp/4;while(nstR.current<ctx.currentTime+.1){const st=csR.current%sc;setCurStep(st);const swOff=st%2===1?(sw-50)/100*stepDur:0;for(const ch of chs){if(ch.mute||!ch.steps[st])continue;const s=smp[ch.sampleIdx];if(!s)continue;const ratch=Math.max(1,Math.min(8,Math.floor(Number(ch.ratchets?.[st])||1)));const vel=(ch.velocities?.[st]??80)/127;for(let r=0;r<ratch;r++){const src=ctx.createBufferSource();src.buffer=s.buffer;if(ch.pitch&&isFinite(ch.pitch)&&ch.pitch>0&&ch.pitch!==1)src.playbackRate.value=ch.pitch;const g=ctx.createGain();g.gain.value=Math.max(0,ch.vol*vel/ratch);src.connect(g);g.connect(masterGR.current!);const when=nstR.current+swOff+r*(stepDur/ratch);src.start(Math.max(ctx.currentTime,when));}}nstR.current+=stepDur;csR.current++;}};seqTR.current=setInterval(sched,25);}} style={{...sb(true,th.ac3,th),fontSize:10,padding:'3px 10px'}} title="Prehrať iba označené stopy (★)">▶ Označené</button>}
+              {channels.some((c:any)=>c.playMark)&&<button onClick={()=>{const marked=channels.filter((c:any)=>c.playMark);if(!marked.length)return;stopSeq();const ctx=getCtx();if(ctx.state==='suspended')ctx.resume();if(!masterGR.current){masterGR.current=ctx.createGain();masterGR.current.connect(ctx.destination);}masterGR.current.gain.value=mvR.current;csR.current=0;nstR.current=ctx.currentTime+.05;setSeqPlaying(true);const sched=()=>{const chs=chRef.current.filter((_:any,i:number)=>chRef.current[i]?.playMark);const smp=smpRef.current,bp=bpmRef.current,sw=swRef.current,sc=Math.max(1,scR.current|0);const stepDur=60/bp/4;while(nstR.current<ctx.currentTime+.1){const st=csR.current%sc;setCurStep(st);const swOff=st%2===1?(sw-50)/100*stepDur:0;for(const ch of chs){if(ch.mute||!ch.steps?.[st])continue;const s=smp[ch.sampleIdx];if(!s)continue;const ratch=Math.max(1,Math.min(8,Math.floor(Number(ch.ratchets?.[st])||1)));const vel=(ch.velocities?.[st]??80)/127;for(let r=0;r<ratch;r++){const src=ctx.createBufferSource();src.buffer=s.buffer;if(ch.pitch&&isFinite(ch.pitch)&&ch.pitch>0&&ch.pitch!==1)src.playbackRate.value=ch.pitch;const g=ctx.createGain();g.gain.value=Math.max(0,ch.vol*vel/ratch);src.connect(g);g.connect(masterGR.current!);const when=nstR.current+swOff+r*(stepDur/ratch);src.start(Math.max(ctx.currentTime,when));}}nstR.current+=stepDur;csR.current++;}};seqTR.current=setInterval(sched,25);}} style={{...sb(true,th.ac3,th),fontSize:10,padding:'3px 10px'}} title="Prehrať iba označené stopy (★)">▶ Označené</button>}
             </div>
 
             {/* SEQ Overview waveform */}
@@ -812,7 +889,7 @@ export default function App(){
                     </div>
                     {/* Steps (right) */}
                     <div style={{display:'flex',gap:2,flex:1}}>
-                      {ch.steps.slice(0,stepCount).map((on:boolean,si:number)=>{
+                      {(ch.steps||[]).slice(0,stepCount).map((on:boolean,si:number)=>{
                         const vel=ch.velocities?.[si]??80;const ratch=ch.ratchets?.[si]||1;
                         const isActive=si===curStep&&seqPlaying;const isBeat=si%4===0;
                         return(
@@ -988,10 +1065,41 @@ export default function App(){
                 <button style={{...sb(false,null,th),fontSize:10,padding:'3px 9px'}} onClick={()=>{const buf=renderBlockWithOverlap(trackSel!);if(buf)addSample(selBlock.name+'_mix',buf);}} title="Render tohto bloku + všetky prekrývajúce sa zvuky z ostatných trackov → Library">+ prekryvy → Library</button>
                 <button style={{...sb(false,null,th),fontSize:10,padding:'3px 9px'}} onClick={()=>doExport(selBlock.buffer,selBlock.name)} title="Export bloku ako WAV">Export WAV</button>
                 <button style={{...sb(selBlock.mute,th.red,th),fontSize:10,padding:'3px 9px'}} onClick={()=>setTrackBlocks(p=>p.map(b=>b.id===trackSel?{...b,mute:!b.mute}:b))}>{selBlock.mute?'Unmute':'Mute'}</button>
-                <button style={{...sb(false,th.ac3,th),fontSize:10,padding:'3px 9px'}} onClick={()=>{trackIdR.current++;setTrackBlocks(p=>[...p,{...selBlock,id:trackIdR.current,name:selBlock.name+'_dup',startSec:selBlock.startSec+selBlock.buffer.duration}]);}}>Dup</button>
+                <button style={{...sb(false,th.ac3,th),fontSize:10,padding:'3px 9px'}} onClick={()=>{trackIdR.current++;const layerEnd=trackBlocks.filter(b=>b.layer===selBlock.layer).reduce((mx,b)=>Math.max(mx,b.startSec+b.buffer.duration),0);setTrackBlocks(p=>[...p,{...selBlock,id:trackIdR.current,name:selBlock.name+'_dup',startSec:layerEnd}]);}} title="Duplikuj a vlož na koniec stopy">Dup</button>
                 <button style={{...sb(false,null,th),fontSize:10,padding:'3px 9px'}} onClick={()=>splitTrackBlock(trackSel!,.5)}>Split ½</button>
-                <button style={{background:'none',border:`1px solid ${th.red}`,color:th.red,borderRadius:3,fontSize:10,padding:'3px 9px',cursor:'pointer'}} onClick={()=>{setTrackBlocks(p=>p.filter(b=>b.id!==trackSel));setTrackSel(null);}}>×</button>
+                <button style={{...sb(trackCropRange!=null,th.ac2,th),fontSize:10,padding:'3px 9px'}} onClick={()=>setTrackCropRange(r=>r?null:[0,selBlock.buffer.duration])} title="Orezať (Crop) začiatok/koniec bloku">Crop</button>
+                <button style={{background:'none',border:`1px solid ${th.red}`,color:th.red,borderRadius:3,fontSize:10,padding:'3px 9px',cursor:'pointer'}} onClick={()=>{setTrackBlocks(p=>p.filter(b=>b.id!==trackSel));setTrackSel(null);setTrackCropRange(null);}}>×</button>
               </div>
+              {trackCropRange&&<div style={{background:th.bgD,border:`1px solid ${th.ac2}`,borderRadius:5,padding:'8px 10px',marginBottom:8}}>
+                <div style={{fontSize:9,color:th.ac2,fontWeight:700,marginBottom:6}}>✂ Crop — orezanie bloku</div>
+                <div style={{display:'flex',gap:10,alignItems:'center',marginBottom:4}}>
+                  <span style={{fontSize:9,color:th.txD,minWidth:60}}>Začiatok: {trackCropRange[0].toFixed(2)}s</span>
+                  <input type="range" min={0} max={selBlock.buffer.duration} step={.01} value={trackCropRange[0]}
+                    onChange={e=>setTrackCropRange(r=>r?[Math.min(+e.target.value,r[1]-.05),r[1]]:null)}
+                    style={{flex:1,accentColor:th.ac2}}/>
+                </div>
+                <div style={{display:'flex',gap:10,alignItems:'center',marginBottom:8}}>
+                  <span style={{fontSize:9,color:th.txD,minWidth:60}}>Koniec: {trackCropRange[1].toFixed(2)}s</span>
+                  <input type="range" min={0} max={selBlock.buffer.duration} step={.01} value={trackCropRange[1]}
+                    onChange={e=>setTrackCropRange(r=>r?[r[0],Math.max(+e.target.value,r[0]+.05)]:null)}
+                    style={{flex:1,accentColor:th.ac2}}/>
+                </div>
+                <div style={{display:'flex',gap:6}}>
+                  <button style={{...sb(false,th.ac2,th),fontSize:10,padding:'3px 12px'}} onClick={()=>{
+                    if(!trackCropRange)return;const ctx=getCtx();
+                    const buf=cropT(selBlock.buffer,trackCropRange[0],trackCropRange[1],ctx);
+                    setTrackBlocks(p=>p.map(b=>b.id===trackSel?{...b,buffer:buf}:b));
+                    setTrackCropRange(null);setLog(p=>[...p,`✂ Crop "${selBlock.name}" ${trackCropRange[0].toFixed(2)}s–${trackCropRange[1].toFixed(2)}s`]);
+                  }}>Použiť Crop</button>
+                  <button style={{...sb(false,null,th),fontSize:10,padding:'3px 12px'}} onClick={()=>{
+                    if(!trackCropRange)return;const ctx=getCtx();
+                    const buf=cropT(selBlock.buffer,trackCropRange[0],trackCropRange[1],ctx);
+                    addSample(selBlock.name+'_crop',buf);
+                    setLog(p=>[...p,`▸ Crop úsek → Library "${selBlock.name}_crop"`]);
+                  }}>→ Library</button>
+                  <button style={{...sb(false,null,th),fontSize:10,padding:'3px 12px'}} onClick={()=>setTrackCropRange(null)}>Zrušiť</button>
+                </div>
+              </div>}
               <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:8}}>
                 <div style={{flex:1,minWidth:120}}>
                   <div style={{fontSize:9,color:th.txD,marginBottom:2}}>Hlasitosť: {(selBlock.vol*100).toFixed(0)}%</div>
@@ -1006,7 +1114,13 @@ export default function App(){
               <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(130px,1fr))',gap:5}}>
                 {([['Skreslenie',(trackBlockFx.saturation*100).toFixed(0)+'%','saturation',0,1,.01],['Reverb',(trackBlockFx.reverb*100).toFixed(0)+'%','reverb',0,1,.01],['Chorus',(trackBlockFx.chorus*100).toFixed(0)+'%','chorus',0,1,.01],['Bitcrusher',(trackBlockFx.bitCrush*100).toFixed(0)+'%','bitCrush',0,1,.01],['Filter LP',trackBlockFx.lpFreq>=20000?'OFF':(trackBlockFx.lpFreq/1000).toFixed(1)+'k','lpFreq',200,20000,100],['Delay',(trackBlockFx.delay*100).toFixed(0)+'%','delay',0,1,.01]] as [string,string,string,number,number,number][]).map(([lbl,val,key,mn,mx,st])=>(
                   <div key={key} style={{background:th.bgP,border:`1px solid ${th.bd}`,borderRadius:4,padding:'4px 7px'}}>
-                    <div style={{display:'flex',justifyContent:'space-between',marginBottom:2}}><span style={{fontSize:8,color:th.txD}}>{lbl}</span><span style={{fontSize:9,color:selBlock.color,fontWeight:700}}>{val}</span></div>
+                    <div style={{display:'flex',justifyContent:'space-between',marginBottom:2}}>
+                      <span style={{fontSize:8,color:th.txD,display:'flex',alignItems:'center',gap:3}}>
+                        {lbl}
+                        {FX_DESC[key]&&<span title={FX_DESC[key]} style={{cursor:'help',color:th.txD,opacity:.5,fontSize:7,border:`1px solid ${th.txD}`,borderRadius:'50%',width:10,height:10,display:'inline-flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>?</span>}
+                      </span>
+                      <span style={{fontSize:9,color:selBlock.color,fontWeight:700}}>{val}</span>
+                    </div>
                     <input type="range" min={mn} max={mx} step={st} value={(trackBlockFx as any)[key]} onChange={e=>setTrackBlockFx(f=>({...f,[key]:+e.target.value}))} style={{width:'100%',accentColor:selBlock.color}}/>
                   </div>
                 ))}
@@ -1045,7 +1159,10 @@ export default function App(){
                 ] as [string,string,keyof typeof fx,number,number,number][]).map(([label,val,key,min,max,step])=>(
                   <div key={key} style={{background:th.bgD,border:`1px solid ${th.bd}`,borderRadius:6,padding:'8px 10px'}}>
                     <div style={{display:'flex',justifyContent:'space-between',marginBottom:6}}>
-                      <span style={{fontSize:10,fontWeight:600,color:th.txD,textTransform:'uppercase',letterSpacing:1}}>{label}</span>
+                      <span style={{fontSize:10,fontWeight:600,color:th.txD,textTransform:'uppercase',letterSpacing:1,display:'flex',alignItems:'center',gap:4}}>
+                        {label}
+                        {FX_DESC[key]&&<span title={FX_DESC[key]} style={{cursor:'help',opacity:.5,fontSize:8,border:`1px solid ${th.txD}`,borderRadius:'50%',width:12,height:12,display:'inline-flex',alignItems:'center',justifyContent:'center',flexShrink:0,textTransform:'none',letterSpacing:0}}>?</span>}
+                      </span>
                       <span style={{fontSize:11,fontWeight:700,color:th.ac}}>{val}</span>
                     </div>
                     <input type="range" min={min} max={max} step={step} value={fx[key] as number} onChange={e=>setFx(f=>({...f,[key]:+e.target.value}))} style={{width:'100%',accentColor:th.ac}}/>
