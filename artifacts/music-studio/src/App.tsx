@@ -1326,24 +1326,38 @@ export default function App(){
                 fd.append('mode',decompMode);
                 if(decompMode==='zoom'){fd.append('target_instrument',zoomTarget);fd.append('fragment_start',zoomStart);fd.append('fragment_end',zoomEnd);}
                 const resp=await fetch(`${BASE}/api/decompose`,{method:'POST',body:fd});
+                if(!resp.ok){const t=await resp.text().catch(()=>'');throw new Error(`Server error ${resp.status}${t?': '+t.slice(0,120):''}`);}
                 if(!resp.body)throw new Error('No response body');
-                const reader=resp.body.getReader();const dec=new TextDecoder();
+                const reader=resp.body.getReader();const dec=new TextDecoder();let gotFinal=false;
                 while(true){
                   const{done,value}=await reader.read();if(done)break;
                   const txt=dec.decode(value);
                   for(const line of txt.split('\n')){
                     if(!line.startsWith('data: '))continue;
                     try{const ev=JSON.parse(line.slice(6));
-                      if(ev.step==='error'){setDecompStep('✗ '+ev.message);setDecompLoading(false);return;}
-                      if(ev.step==='done'){setDecompResult(ev.data);setDecompLoading(false);setDecompStep('');return;}
+                      if(ev.step==='error'){setDecompStep('✗ '+ev.message);setDecompLoading(false);gotFinal=true;return;}
+                      if(ev.step==='done'){setDecompResult(ev.data);setDecompLoading(false);setDecompStep('');gotFinal=true;return;}
                       if(ev.message)setDecompStep(ev.message);
                     }catch{}
                   }
                 }
+                if(!gotFinal){setDecompStep('✗ Spojenie so serverom sa prerušilo bez výsledku.');setDecompLoading(false);}
               }catch(e:any){setDecompStep('✗ '+e.message);setDecompLoading(false);}
             }} style={{...b1(true,'#aa44ff',th),padding:'10px 20px',fontWeight:800,fontSize:12,opacity:decompFile?1:.45}}>
               ▶ Spustiť dekompozíciu
             </button>
+          )}
+
+          {/* Error display — shown after failed decompose */}
+          {!decompLoading&&!decompResult&&decompStep.startsWith('✗')&&(
+            <div style={{padding:'10px 14px',background:'#ff000018',border:'1px solid #ff444466',borderRadius:6,fontSize:11,color:'#ff7777',display:'flex',gap:8,alignItems:'flex-start'}}>
+              <span style={{fontSize:14,lineHeight:1}}>⚠</span>
+              <div style={{flex:1}}>
+                <div style={{fontWeight:700,marginBottom:2}}>Chyba dekompozície</div>
+                <div style={{lineHeight:1.5}}>{decompStep.slice(2)}</div>
+              </div>
+              <button onClick={()=>setDecompStep('')} style={{background:'none',border:'none',color:'#ff7777',cursor:'pointer',fontSize:14,lineHeight:1,padding:0}}>×</button>
+            </div>
           )}
 
           {/* Loading state */}
