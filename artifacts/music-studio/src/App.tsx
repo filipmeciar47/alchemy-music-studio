@@ -377,7 +377,9 @@ export default function App(){
   const[abPending,setAbPending]=useState<any>(null);
   // Decompositor state
   const[seqOneShot,setSeqOneShot]=useState(false);
-  const[seqClip,setSeqClip]=useState<{steps:boolean[],velocities:number[]}|null>(null);
+  const[seqSelMode,setSeqSelMode]=useState(false);
+  const[seqSelRows,setSeqSelRows]=useState<Set<number>>(new Set());
+  const[seqClip,setSeqClip]=useState<{steps:boolean[],velocities:number[]}[]|null>(null);
   const[showDecompose,setShowDecompose]=useState(false);
   const[decompMode,setDecompMode]=useState<'track'|'stem'|'zoom'>('track');
   const[decompStep,setDecompStep]=useState('');
@@ -406,6 +408,28 @@ export default function App(){
   useEffect(()=>{swRef.current=swing;},[swing]);
   useEffect(()=>{scR.current=stepCount;},[stepCount]);
   useEffect(()=>{seqOneShotR.current=seqOneShot;},[seqOneShot]);
+  useEffect(()=>{
+    const onKey=(e:KeyboardEvent)=>{
+      if(!seqSelMode)return;
+      if((e.ctrlKey||e.metaKey)&&e.key==='c'){
+        e.preventDefault();
+        const sel=Array.from(seqSelRows);
+        if(!sel.length)return;
+        const clip=sel.map(i=>{const ch=chRef.current[i];return ch?{steps:[...(ch.steps||[])],velocities:[...(ch.velocities||[])]}:{steps:[],velocities:[]};});
+        setSeqClip(clip);
+        setLog(p=>[...p,`⊞ Skopírované ${sel.length} stop(y) do schránky`]);
+      }
+      if((e.ctrlKey||e.metaKey)&&e.key==='v'){
+        e.preventDefault();
+        const clip=seqClip;if(!clip||!clip.length)return;
+        const targets=Array.from(seqSelRows);if(!targets.length)return;
+        setChannels((p:any[])=>p.map((ch:any,i:number)=>{const tIdx=targets.indexOf(i);if(tIdx<0)return ch;const src=clip[tIdx%clip.length];return{...ch,steps:[...src.steps],velocities:[...src.velocities]};}));
+        setLog(p=>[...p,`⊟ Prilepené do ${targets.length} stop(y)`]);
+      }
+    };
+    document.addEventListener('keydown',onKey);
+    return()=>document.removeEventListener('keydown',onKey);
+  },[seqSelMode,seqSelRows,seqClip]);
   useEffect(()=>{mvR.current=masterVol;if(masterGR.current)masterGR.current.gain.value=masterVol;},[masterVol]);
   useEffect(()=>()=>{if(seqTR.current)clearInterval(seqTR.current);},[]);
   useEffect(()=>{const c=cvR.current;if(!c)return;const ro=new ResizeObserver(()=>{c.width=c.offsetWidth;c.height=c.offsetHeight;drawWf(c,cur?.buffer,wfSel,playPos,th);});ro.observe(c);return()=>ro.disconnect();},[cur,wfSel,playPos,th]);
@@ -775,6 +799,11 @@ export default function App(){
               <button onClick={()=>doBounce()} disabled={!channels.length} style={{...sb(false,th.ac2,th),fontSize:10,padding:'3px 10px'}} title="Ulož sekvenciu ako vzorku do knižnice">SEQ→Knižnica</button>
               <button onClick={()=>{const ctx=getCtx();const buf=bouncePat(channels,samples,bpm,stepCount,swing,ctx);doExport(buf,`SEQ_${bpm}bpm`);}} disabled={!channels.length} style={{...sb(false,null,th),fontSize:10,padding:'3px 10px'}} title="Exportuj sekvenciu ako WAV">Export SEQ</button>
               {channels.some((c:any)=>c.solo)&&<button onClick={()=>setChannels((p:any[])=>p.map((c:any)=>({...c,solo:false})))} style={{...sb(true,th.ac2,th),fontSize:10,padding:'3px 10px'}} title="Zruš solo — znova hrá celá sekvencia">⊘ Sólo</button>}
+              <div style={{width:1,height:20,background:th.bd}}/>
+              <button onClick={()=>{setSeqSelMode(p=>!p);setSeqSelRows(new Set());}} style={{...sb(seqSelMode,'#ffaa00',th),fontSize:10,padding:'3px 10px',fontWeight:700}} title="Zapni/vypni režim výberu stôp (pre kopírovanie)">📋 {seqSelMode?'Výber ZAP':'Výber'}</button>
+              {seqSelMode&&seqSelRows.size>0&&<button onClick={()=>{const sel=Array.from(seqSelRows);const clip=sel.map(i=>{const ch=channels[i];return ch?{steps:[...(ch.steps||[])],velocities:[...(ch.velocities||[])]}:{steps:[],velocities:[]};});setSeqClip(clip);setLog(p=>[...p,`⊞ Skopírované ${sel.length} stop(y) — vyber cieľ a klikni Prilepiť`]);}} style={{...sb(false,'#ffaa00',th),fontSize:10,padding:'3px 10px',fontWeight:700}} title="Kopírovať vybrané stopy (Ctrl+C)">⊞ Kopírovať</button>}
+              {seqSelMode&&seqClip&&seqSelRows.size>0&&<button onClick={()=>{const clip=seqClip;if(!clip)return;const targets=Array.from(seqSelRows);setChannels((p:any[])=>p.map((ch:any,i:number)=>{const tIdx=targets.indexOf(i);if(tIdx<0)return ch;const src=clip[tIdx%clip.length];return{...ch,steps:[...src.steps],velocities:[...src.velocities]};}));setLog(p=>[...p,`⊟ Prilepené do ${targets.length} stop(y)`]);}} style={{...sb(true,th.ac3,th),fontSize:10,padding:'3px 10px',fontWeight:700}} title="Prilepiť do vybraných stôp (Ctrl+V)">⊟ Prilepiť</button>}
+              {seqSelMode&&seqClip&&<span style={{fontSize:9,color:'#ffaa00',padding:'0 4px'}}>📋 {seqClip.length} {seqClip.length===1?'stopa':'stopy'} v schránke</span>}
               {channels.some((c:any)=>c.playMark)&&<button onClick={()=>{const marked=channels.filter((c:any)=>c.playMark);if(!marked.length)return;stopSeq();const ctx=getCtx();if(ctx.state==='suspended')ctx.resume();if(!masterGR.current){masterGR.current=ctx.createGain();masterGR.current.connect(ctx.destination);}masterGR.current.gain.value=mvR.current;csR.current=0;nstR.current=ctx.currentTime+.05;setSeqPlaying(true);const sched=()=>{const chs=chRef.current.filter((_:any,i:number)=>chRef.current[i]?.playMark);const smp=smpRef.current,bp=bpmRef.current,sw=swRef.current,sc=Math.max(1,scR.current|0);const stepDur=60/bp/4;while(nstR.current<ctx.currentTime+.1){const st=csR.current%sc;setCurStep(st);const swOff=st%2===1?(sw-50)/100*stepDur:0;for(const ch of chs){if(ch.mute||!ch.steps?.[st])continue;const s=smp[ch.sampleIdx];if(!s)continue;const ratch=Math.max(1,Math.min(8,Math.floor(Number(ch.ratchets?.[st])||1)));const vel=(ch.velocities?.[st]??80)/127;for(let r=0;r<ratch;r++){const src=ctx.createBufferSource();src.buffer=s.buffer;if(ch.pitch&&isFinite(ch.pitch)&&ch.pitch>0&&ch.pitch!==1)src.playbackRate.value=ch.pitch;const g=ctx.createGain();g.gain.value=Math.max(0,ch.vol*vel/ratch);src.connect(g);g.connect(masterGR.current!);const when=nstR.current+swOff+r*(stepDur/ratch);src.start(Math.max(ctx.currentTime,when));}}nstR.current+=stepDur;csR.current++;}};seqTR.current=setInterval(sched,25);}} style={{...sb(true,th.ac3,th),fontSize:10,padding:'3px 10px'}} title="Prehrať iba označené stopy (★)">▶ Označené</button>}
             </div>
 
@@ -861,23 +890,25 @@ export default function App(){
                 <div style={{width:LBL,flexShrink:0,fontSize:9,fontWeight:700,color:th.txD,letterSpacing:1,textTransform:'uppercase'}}>Hlavný track ({stepCount/4} {stepCount/4===1?'takt':stepCount/4<5?'takty':'taktov'})</div>
                 <div style={{display:'flex',gap:2,flex:1}}>
                   {Array.from({length:stepCount}).map((_,si)=>{const isBeat=si%4===0;const ph=si===curStep&&seqPlaying;return(
-                    <div key={si} onClick={()=>setChannels((chs:any[])=>chs.map((ch:any)=>{const s=[...(ch.steps||[])];while(s.length<=si)s.push(false);s[si]=!s[si];return{...ch,steps:s};}))} style={{flex:'1 0 0',textAlign:'center',fontSize:9,fontWeight:700,color:ph?'#fff':isBeat?th.ac:th.txD,paddingBottom:2,borderLeft:isBeat?`2px solid ${th.bd}`:'1px solid transparent',background:ph?th.ac2+'66':'transparent',borderRadius:2,cursor:'pointer'}} title={`Klik = prepni stĺpec ${si+1} pre všetky stopy`}>{isBeat?(si/4+1):'·'}</div>);})}
+                    <div key={si} style={{flex:'1 0 0',textAlign:'center',fontSize:9,fontWeight:700,color:ph?'#fff':isBeat?th.ac:th.txD,paddingBottom:2,borderLeft:isBeat?`2px solid ${th.bd}`:'1px solid transparent',background:ph?th.ac2+'66':'transparent',borderRadius:2}}>{isBeat?(si/4+1):'·'}</div>);})}
                 </div>
               </div>
 
               {/* Lanes — one per sound, timed across the track */}
-              {channels.map((ch:any,ci:number)=>{const s=samples[ch.sampleIdx];const col=cols[ci%cols.length];const anySolo=channels.some((c:any)=>c.solo);const dimmed=anySolo&&!ch.solo;
+              {channels.map((ch:any,ci:number)=>{const s=samples[ch.sampleIdx];const col=cols[ci%cols.length];const anySolo=channels.some((c:any)=>c.solo);const dimmed=anySolo&&!ch.solo;const isRowSel=seqSelRows.has(ci);
                 return(
                 <div key={ci} style={{marginBottom:4,opacity:dimmed?.38:1,transition:'opacity .12s'}}>
                   <div style={{display:'flex',alignItems:'stretch',gap:2}}>
                     {/* Lane header (left) */}
-                    <div style={{width:LBL,flexShrink:0,background:th.bgD,border:`1px solid ${ch.mute?th.bd:col+'44'}`,borderRadius:4,padding:'4px 6px',display:'flex',flexDirection:'column',gap:3,opacity:ch.mute?.55:1}}>
+                    <div style={{width:LBL,flexShrink:0,background:th.bgD,border:`2px solid ${seqSelMode?isRowSel?'#ffaa00':th.bd:ch.mute?th.bd:col+'44'}`,borderRadius:4,padding:'4px 6px',display:'flex',flexDirection:'column',gap:3,opacity:ch.mute?.55:1,cursor:seqSelMode?'pointer':'default',boxShadow:isRowSel?'0 0 0 1px #ffaa00':'none'}}
+                      onClick={seqSelMode?()=>setSeqSelRows(p=>{const n=new Set(p);n.has(ci)?n.delete(ci):n.add(ci);return n;}):undefined}>
                       <div style={{display:'flex',alignItems:'center',gap:4}}>
-                        <div style={{width:4,height:14,borderRadius:2,background:col,flexShrink:0}}/>
-                        <span style={{fontSize:11,fontWeight:700,flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',cursor:'pointer',color:col}} onClick={()=>setEditCh(editCh===ci?null:ci)} title="Klik = viac nastavení (pan, pitch, EQ, zvuk)">{s?.name||'?'}</span>
-                        <button onClick={()=>rmCh(ci)} style={{background:'none',border:'none',color:th.txD,cursor:'pointer',fontSize:13,padding:'0 2px',lineHeight:1}} title="Odstrániť stopu">×</button>
+                        {seqSelMode&&<div style={{width:14,height:14,borderRadius:3,border:`2px solid ${isRowSel?'#ffaa00':th.bd}`,background:isRowSel?'#ffaa0033':'transparent',flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center',fontSize:9,color:'#ffaa00'}}>{isRowSel?'✓':''}</div>}
+                        {!seqSelMode&&<div style={{width:4,height:14,borderRadius:2,background:col,flexShrink:0}}/>}
+                        <span style={{fontSize:11,fontWeight:700,flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',cursor:'pointer',color:seqSelMode?isRowSel?'#ffaa00':th.txD:col}} onClick={seqSelMode?undefined:()=>setEditCh(editCh===ci?null:ci)} title={seqSelMode?'Klik = vyber/odznač túto stopu':'Klik = viac nastavení (pan, pitch, EQ, zvuk)'}>{s?.name||'?'}</span>
+                        {!seqSelMode&&<button onClick={()=>rmCh(ci)} style={{background:'none',border:'none',color:th.txD,cursor:'pointer',fontSize:13,padding:'0 2px',lineHeight:1}} title="Odstrániť stopu">×</button>}
                       </div>
-                      <div style={{display:'flex',alignItems:'center',gap:3}}>
+                      {!seqSelMode&&<div style={{display:'flex',alignItems:'center',gap:3}}>
                         <button onClick={()=>nudgeCh(ci,-1)} style={{...sb(false,null,th),fontSize:10,padding:'1px 5px'}} title="Posuň skôr (o 1 krok vľavo)">◀</button>
                         <button onClick={()=>nudgeCh(ci,1)} style={{...sb(false,null,th),fontSize:10,padding:'1px 5px'}} title="Posuň neskôr (o 1 krok vpravo)">▶</button>
                         <input type="range" min={0} max={1.5} step={.01} value={ch.vol} onChange={e=>updCh(ci,'vol',+e.target.value)} style={{flex:1,height:5,accentColor:col}} title="Hlasitosť"/>
@@ -885,9 +916,7 @@ export default function App(){
                         <button onClick={()=>{updCh(ci,'solo',!ch.solo);if(!ch.solo&&!seqPlaying)startSeq();}} style={{...sb(ch.solo,th.ac2,th),fontSize:9,padding:'1px 5px'}} title="Solo — hrá iba táto stopa. Ak SEQ nebeží, spustí ho.">S</button>
                         <button onClick={()=>updCh(ci,'playMark',!ch.playMark)} style={{...sb(ch.playMark,th.ac3,th),fontSize:9,padding:'1px 5px'}} title="Označ pre selektívne prehranie (▶ Označené)">★</button>
                         <button onClick={()=>updCh(ci,'truncate',!ch.truncate)} style={{...sb(ch.truncate,null,th),fontSize:9,padding:'1px 5px'}} title="Orezať zvuk na dĺžku stepu">✂</button>
-                        <button onClick={()=>setSeqClip({steps:[...(ch.steps||[])],velocities:[...(ch.velocities||[])]})} style={{...sb(false,null,th),fontSize:9,padding:'1px 5px'}} title="Kopírovať kroky tejto stopy do schránky">⊞</button>
-                        {seqClip&&<button onClick={()=>setChannels((p:any[])=>p.map((c:any,j:number)=>j===ci?{...c,steps:[...seqClip.steps],velocities:[...seqClip.velocities]}:c))} style={{...sb(true,th.ac3,th),fontSize:9,padding:'1px 5px'}} title="Prilepiť kroky zo schránky">⊟</button>}
-                      </div>
+                      </div>}
                       {isTK&&<div style={{display:'flex',gap:3}}>
                         <button onClick={()=>updCh(ci,'isKick',!ch.isKick)} style={{...sb(ch.isKick,th.ac3,th),fontSize:8,padding:'1px 5px',flex:1}} title="Kick (zdroj sidechain)">KICK</button>
                         <button onClick={()=>updCh(ci,'sidechain',!ch.sidechain)} style={{...sb(ch.sidechain,'#ff006644',th),fontSize:8,padding:'1px 5px',flex:1}} title="Sidechain duck">SC</button>
