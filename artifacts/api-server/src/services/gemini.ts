@@ -1,12 +1,12 @@
 import { GoogleGenerativeAI, Part } from "@google/generative-ai";
 
-const MODEL = "gemini-2.0-flash";
+const MODEL = "gemini-1.5-flash";
 const INLINE_SIZE_LIMIT = 18 * 1024 * 1024; // 18 MB — stay under 20 MB limit
 
 function client(): GoogleGenerativeAI {
   const key = process.env["GEMINI_API_KEY"];
   if (!key) throw new Error("GEMINI_API_KEY is not set");
-  return new GoogleGenerativeAI(key);
+  return new GoogleGenerativeAI(key, { apiVersion: "v1" });
 }
 
 export interface SmartPreviewResult {
