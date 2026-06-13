@@ -379,7 +379,8 @@ export default function App(){
   const[seqOneShot,setSeqOneShot]=useState(false);
   const[seqSelMode,setSeqSelMode]=useState(false);
   const[seqSelRows,setSeqSelRows]=useState<Set<number>>(new Set());
-  const[seqClip,setSeqClip]=useState<{steps:boolean[],velocities:number[]}[]|null>(null);
+  const[seqSelCols,setSeqSelCols]=useState<[number,number]|null>(null);
+  const[seqClip,setSeqClip]=useState<{steps:boolean[],velocities:number[],colRange:[number,number]|null}[]|null>(null);
   const[showDecompose,setShowDecompose]=useState(false);
   const[decompMode,setDecompMode]=useState<'track'|'stem'|'zoom'>('track');
   const[decompStep,setDecompStep]=useState('');
@@ -396,7 +397,7 @@ export default function App(){
   const th=mode==='tekno'?TK:C;
   const cols=mode==='tekno'?TKC:TC;
 
-  const actxR=useRef<AudioContext|null>(null),cvR=useRef<HTMLCanvasElement|null>(null),srcR=useRef<AudioBufferSourceNode|null>(null),afR=useRef<number|null>(null),stR=useRef(0),sdR=useRef<{s:number}|null>(null),ceR=useRef<HTMLDivElement|null>(null),anR=useRef<AnalyserNode|null>(null),seqTR=useRef<any>(null),nstR=useRef(0),csR=useRef(0),recRef=useRef<any>(null),chRef=useRef<any[]>([]),smpRef=useRef<any[]>([]),bpmRef=useRef(128),swRef=useRef(50),mvR=useRef(1),masterGR=useRef<GainNode|null>(null),scR=useRef(16),seqOneShotR=useRef(false);
+  const actxR=useRef<AudioContext|null>(null),cvR=useRef<HTMLCanvasElement|null>(null),srcR=useRef<AudioBufferSourceNode|null>(null),afR=useRef<number|null>(null),stR=useRef(0),sdR=useRef<{s:number}|null>(null),ceR=useRef<HTMLDivElement|null>(null),anR=useRef<AnalyserNode|null>(null),seqTR=useRef<any>(null),nstR=useRef(0),csR=useRef(0),recRef=useRef<any>(null),chRef=useRef<any[]>([]),smpRef=useRef<any[]>([]),bpmRef=useRef(128),swRef=useRef(50),mvR=useRef(1),masterGR=useRef<GainNode|null>(null),scR=useRef(16),seqOneShotR=useRef(false),seqColDragR=useRef<number|null>(null);
   const getCtx=useCallback(()=>{if(!actxR.current)actxR.current=new(window.AudioContext||(window as any).webkitAudioContext)();return actxR.current;},[]);
   const cur=sel!=null?samples[sel]:null;
   const lastReply=[...msgs].reverse().find(m=>m.role==='assistant')?.content||'';
@@ -408,28 +409,43 @@ export default function App(){
   useEffect(()=>{swRef.current=swing;},[swing]);
   useEffect(()=>{scR.current=stepCount;},[stepCount]);
   useEffect(()=>{seqOneShotR.current=seqOneShot;},[seqOneShot]);
+  useEffect(()=>{const up=()=>{seqColDragR.current=null;};document.addEventListener('mouseup',up);return()=>document.removeEventListener('mouseup',up);},[]);
   useEffect(()=>{
+    const doCopy=()=>{
+      const sel=Array.from(seqSelRows);if(!sel.length)return;
+      const cr=seqSelCols;
+      const clip=sel.map(i=>{
+        const ch=chRef.current[i];if(!ch)return{steps:[],velocities:[],colRange:cr};
+        const steps=[...(ch.steps||[])];const velocities=[...(ch.velocities||[])];
+        if(cr){const ms=steps.map((v:boolean,k:number)=>k>=cr[0]&&k<=cr[1]?v:false);const mv=velocities.map((v:number,k:number)=>k>=cr[0]&&k<=cr[1]?v:80);return{steps:ms,velocities:mv,colRange:cr};}
+        return{steps,velocities,colRange:null};
+      });
+      setSeqClip(clip);
+      const colInfo=cr?` (stĺpce ${cr[0]+1}–${cr[1]+1})`:'';
+      setLog(p=>[...p,`⊞ Skopírované ${sel.length} stop(y)${colInfo} — vyber cieľ a vlep`]);
+    };
+    const doPaste=(clip:any[])=>{
+      const targets=Array.from(seqSelRows);if(!targets.length)return;
+      setChannels((p:any[])=>p.map((ch:any,i:number)=>{
+        const tIdx=targets.indexOf(i);if(tIdx<0)return ch;
+        const src=clip[tIdx%clip.length];
+        if(src.colRange){
+          const ns=[...(ch.steps||[])];const nv=[...(ch.velocities||[])];
+          for(let c=src.colRange[0];c<=src.colRange[1];c++){ns[c]=src.steps[c]??false;nv[c]=src.velocities[c]??80;}
+          return{...ch,steps:ns,velocities:nv};
+        }
+        return{...ch,steps:[...src.steps],velocities:[...src.velocities]};
+      }));
+      setLog(p=>[...p,`⊟ Prilepené do ${targets.length} stop(y)`]);
+    };
     const onKey=(e:KeyboardEvent)=>{
       if(!seqSelMode)return;
-      if((e.ctrlKey||e.metaKey)&&e.key==='c'){
-        e.preventDefault();
-        const sel=Array.from(seqSelRows);
-        if(!sel.length)return;
-        const clip=sel.map(i=>{const ch=chRef.current[i];return ch?{steps:[...(ch.steps||[])],velocities:[...(ch.velocities||[])]}:{steps:[],velocities:[]};});
-        setSeqClip(clip);
-        setLog(p=>[...p,`⊞ Skopírované ${sel.length} stop(y) do schránky`]);
-      }
-      if((e.ctrlKey||e.metaKey)&&e.key==='v'){
-        e.preventDefault();
-        const clip=seqClip;if(!clip||!clip.length)return;
-        const targets=Array.from(seqSelRows);if(!targets.length)return;
-        setChannels((p:any[])=>p.map((ch:any,i:number)=>{const tIdx=targets.indexOf(i);if(tIdx<0)return ch;const src=clip[tIdx%clip.length];return{...ch,steps:[...src.steps],velocities:[...src.velocities]};}));
-        setLog(p=>[...p,`⊟ Prilepené do ${targets.length} stop(y)`]);
-      }
+      if((e.ctrlKey||e.metaKey)&&e.key==='c'){e.preventDefault();doCopy();}
+      if((e.ctrlKey||e.metaKey)&&e.key==='v'){e.preventDefault();const c=seqClip;if(c&&c.length)doPaste(c);}
     };
     document.addEventListener('keydown',onKey);
     return()=>document.removeEventListener('keydown',onKey);
-  },[seqSelMode,seqSelRows,seqClip]);
+  },[seqSelMode,seqSelRows,seqSelCols,seqClip]);
   useEffect(()=>{mvR.current=masterVol;if(masterGR.current)masterGR.current.gain.value=masterVol;},[masterVol]);
   useEffect(()=>()=>{if(seqTR.current)clearInterval(seqTR.current);},[]);
   useEffect(()=>{const c=cvR.current;if(!c)return;const ro=new ResizeObserver(()=>{c.width=c.offsetWidth;c.height=c.offsetHeight;drawWf(c,cur?.buffer,wfSel,playPos,th);});ro.observe(c);return()=>ro.disconnect();},[cur,wfSel,playPos,th]);
@@ -800,10 +816,22 @@ export default function App(){
               <button onClick={()=>{const ctx=getCtx();const buf=bouncePat(channels,samples,bpm,stepCount,swing,ctx);doExport(buf,`SEQ_${bpm}bpm`);}} disabled={!channels.length} style={{...sb(false,null,th),fontSize:10,padding:'3px 10px'}} title="Exportuj sekvenciu ako WAV">Export SEQ</button>
               {channels.some((c:any)=>c.solo)&&<button onClick={()=>setChannels((p:any[])=>p.map((c:any)=>({...c,solo:false})))} style={{...sb(true,th.ac2,th),fontSize:10,padding:'3px 10px'}} title="Zruš solo — znova hrá celá sekvencia">⊘ Sólo</button>}
               <div style={{width:1,height:20,background:th.bd}}/>
-              <button onClick={()=>{setSeqSelMode(p=>!p);setSeqSelRows(new Set());}} style={{...sb(seqSelMode,'#ffaa00',th),fontSize:10,padding:'3px 10px',fontWeight:700}} title="Zapni/vypni režim výberu stôp (pre kopírovanie)">📋 {seqSelMode?'Výber ZAP':'Výber'}</button>
-              {seqSelMode&&seqSelRows.size>0&&<button onClick={()=>{const sel=Array.from(seqSelRows);const clip=sel.map(i=>{const ch=channels[i];return ch?{steps:[...(ch.steps||[])],velocities:[...(ch.velocities||[])]}:{steps:[],velocities:[]};});setSeqClip(clip);setLog(p=>[...p,`⊞ Skopírované ${sel.length} stop(y) — vyber cieľ a klikni Prilepiť`]);}} style={{...sb(false,'#ffaa00',th),fontSize:10,padding:'3px 10px',fontWeight:700}} title="Kopírovať vybrané stopy (Ctrl+C)">⊞ Kopírovať</button>}
-              {seqSelMode&&seqClip&&seqSelRows.size>0&&<button onClick={()=>{const clip=seqClip;if(!clip)return;const targets=Array.from(seqSelRows);setChannels((p:any[])=>p.map((ch:any,i:number)=>{const tIdx=targets.indexOf(i);if(tIdx<0)return ch;const src=clip[tIdx%clip.length];return{...ch,steps:[...src.steps],velocities:[...src.velocities]};}));setLog(p=>[...p,`⊟ Prilepené do ${targets.length} stop(y)`]);}} style={{...sb(true,th.ac3,th),fontSize:10,padding:'3px 10px',fontWeight:700}} title="Prilepiť do vybraných stôp (Ctrl+V)">⊟ Prilepiť</button>}
-              {seqSelMode&&seqClip&&<span style={{fontSize:9,color:'#ffaa00',padding:'0 4px'}}>📋 {seqClip.length} {seqClip.length===1?'stopa':'stopy'} v schránke</span>}
+              <button onClick={()=>{setSeqSelMode(p=>!p);setSeqSelRows(new Set());setSeqSelCols(null);}} style={{...sb(seqSelMode,'#ffaa00',th),fontSize:10,padding:'3px 10px',fontWeight:700}} title="Zapni/vypni režim výberu (stopy + stĺpce)">📋 {seqSelMode?'Výber ZAP':'Výber'}</button>
+              {seqSelMode&&<span style={{fontSize:9,color:th.txD,padding:'0 2px'}}>{seqSelRows.size>0?`${seqSelRows.size} stop(y)`:''}{seqSelCols?` · st. ${seqSelCols[0]+1}–${seqSelCols[1]+1}`:seqSelRows.size>0?' · všetky stĺpce':''}</span>}
+              {seqSelMode&&seqSelCols&&<button onClick={()=>setSeqSelCols(null)} style={{...sb(false,null,th),fontSize:9,padding:'2px 7px'}} title="Zrušiť výber stĺpcov (kopírovať všetky)">× stĺpce</button>}
+              {seqSelMode&&seqSelRows.size>0&&<button onClick={()=>{
+                const cr=seqSelCols;
+                const clip=Array.from(seqSelRows).map(i=>{const ch=channels[i];if(!ch)return{steps:[],velocities:[],colRange:cr};const steps=[...(ch.steps||[])];const velocities=[...(ch.velocities||[])];if(cr){return{steps:steps.map((v:boolean,k:number)=>k>=cr[0]&&k<=cr[1]?v:false),velocities:velocities.map((v:number,k:number)=>k>=cr[0]&&k<=cr[1]?v:80),colRange:cr};}return{steps,velocities,colRange:null};});
+                setSeqClip(clip);
+                setLog(p=>[...p,`⊞ Skopírované ${clip.length} stop(y)${cr?` (st. ${cr[0]+1}–${cr[1]+1})`:''}`]);
+              }} style={{...sb(false,'#ffaa00',th),fontSize:10,padding:'3px 10px',fontWeight:700}} title="Kopírovať výber (Ctrl+C)">⊞ Kopírovať</button>}
+              {seqSelMode&&seqClip&&seqSelRows.size>0&&<button onClick={()=>{
+                const clip=seqClip;if(!clip)return;
+                const targets=Array.from(seqSelRows);
+                setChannels((p:any[])=>p.map((ch:any,i:number)=>{const tIdx=targets.indexOf(i);if(tIdx<0)return ch;const src=clip[tIdx%clip.length];if(src.colRange){const ns=[...(ch.steps||[])];const nv=[...(ch.velocities||[])];for(let c=src.colRange[0];c<=src.colRange[1];c++){ns[c]=src.steps[c]??false;nv[c]=src.velocities[c]??80;}return{...ch,steps:ns,velocities:nv};}return{...ch,steps:[...src.steps],velocities:[...src.velocities]};}));
+                setLog(p=>[...p,`⊟ Prilepené do ${targets.length} stop(y)`]);
+              }} style={{...sb(true,th.ac3,th),fontSize:10,padding:'3px 10px',fontWeight:700}} title="Prilepiť do vybraných stôp (Ctrl+V)">⊟ Prilepiť</button>}
+              {seqSelMode&&seqClip&&<span style={{fontSize:9,color:'#ffaa00',padding:'0 4px'}}>📋 {seqClip.length}× {seqClip[0]?.colRange?`st.${seqClip[0].colRange[0]+1}–${seqClip[0].colRange[1]+1}`:'všetky'}</span>}
               {channels.some((c:any)=>c.playMark)&&<button onClick={()=>{const marked=channels.filter((c:any)=>c.playMark);if(!marked.length)return;stopSeq();const ctx=getCtx();if(ctx.state==='suspended')ctx.resume();if(!masterGR.current){masterGR.current=ctx.createGain();masterGR.current.connect(ctx.destination);}masterGR.current.gain.value=mvR.current;csR.current=0;nstR.current=ctx.currentTime+.05;setSeqPlaying(true);const sched=()=>{const chs=chRef.current.filter((_:any,i:number)=>chRef.current[i]?.playMark);const smp=smpRef.current,bp=bpmRef.current,sw=swRef.current,sc=Math.max(1,scR.current|0);const stepDur=60/bp/4;while(nstR.current<ctx.currentTime+.1){const st=csR.current%sc;setCurStep(st);const swOff=st%2===1?(sw-50)/100*stepDur:0;for(const ch of chs){if(ch.mute||!ch.steps?.[st])continue;const s=smp[ch.sampleIdx];if(!s)continue;const ratch=Math.max(1,Math.min(8,Math.floor(Number(ch.ratchets?.[st])||1)));const vel=(ch.velocities?.[st]??80)/127;for(let r=0;r<ratch;r++){const src=ctx.createBufferSource();src.buffer=s.buffer;if(ch.pitch&&isFinite(ch.pitch)&&ch.pitch>0&&ch.pitch!==1)src.playbackRate.value=ch.pitch;const g=ctx.createGain();g.gain.value=Math.max(0,ch.vol*vel/ratch);src.connect(g);g.connect(masterGR.current!);const when=nstR.current+swOff+r*(stepDur/ratch);src.start(Math.max(ctx.currentTime,when));}}nstR.current+=stepDur;csR.current++;}};seqTR.current=setInterval(sched,25);}} style={{...sb(true,th.ac3,th),fontSize:10,padding:'3px 10px'}} title="Prehrať iba označené stopy (★)">▶ Označené</button>}
             </div>
 
@@ -889,8 +917,16 @@ export default function App(){
               <div style={{display:'flex',alignItems:'flex-end',gap:2,marginBottom:6,position:'sticky',top:0,zIndex:2,background:th.bg,paddingBottom:3,borderBottom:`1px solid ${th.bd}`}}>
                 <div style={{width:LBL,flexShrink:0,fontSize:9,fontWeight:700,color:th.txD,letterSpacing:1,textTransform:'uppercase'}}>Hlavný track ({stepCount/4} {stepCount/4===1?'takt':stepCount/4<5?'takty':'taktov'})</div>
                 <div style={{display:'flex',gap:2,flex:1}}>
-                  {Array.from({length:stepCount}).map((_,si)=>{const isBeat=si%4===0;const ph=si===curStep&&seqPlaying;return(
-                    <div key={si} style={{flex:'1 0 0',textAlign:'center',fontSize:9,fontWeight:700,color:ph?'#fff':isBeat?th.ac:th.txD,paddingBottom:2,borderLeft:isBeat?`2px solid ${th.bd}`:'1px solid transparent',background:ph?th.ac2+'66':'transparent',borderRadius:2}}>{isBeat?(si/4+1):'·'}</div>);})}
+                  {Array.from({length:stepCount}).map((_,si)=>{const isBeat=si%4===0;const ph=si===curStep&&seqPlaying;const inCS=seqSelMode&&seqSelCols!=null&&si>=seqSelCols[0]&&si<=seqSelCols[1];return(
+                    <div key={si}
+                      onMouseDown={seqSelMode?e=>{e.preventDefault();seqColDragR.current=si;setSeqSelCols([si,si]);}:undefined}
+                      onMouseEnter={seqSelMode?()=>{if(seqColDragR.current!=null){const a=seqColDragR.current;setSeqSelCols([Math.min(a,si),Math.max(a,si)]);}}:undefined}
+                      style={{flex:'1 0 0',textAlign:'center',fontSize:9,fontWeight:700,userSelect:'none',
+                        color:inCS?'#000':ph?'#fff':isBeat?th.ac:th.txD,
+                        paddingBottom:2,borderLeft:isBeat?`2px solid ${th.bd}`:'1px solid transparent',
+                        background:inCS?'#ffaa00':ph?th.ac2+'66':'transparent',
+                        borderRadius:2,cursor:seqSelMode?'col-resize':'default'
+                      }}>{isBeat?(si/4+1):'·'}</div>);})}
                 </div>
               </div>
 
@@ -927,8 +963,9 @@ export default function App(){
                       {(ch.steps||[]).slice(0,stepCount).map((on:boolean,si:number)=>{
                         const vel=ch.velocities?.[si]??80;const ratch=ch.ratchets?.[si]||1;
                         const isActive=si===curStep&&seqPlaying;const isBeat=si%4===0;
+                        const inColSel=seqSelMode&&isRowSel&&seqSelCols!=null&&si>=seqSelCols[0]&&si<=seqSelCols[1];
                         return(
-                        <div key={si} style={{display:'flex',flexDirection:'column',alignItems:'center',gap:0,flex:'1 0 0',borderLeft:isBeat?`2px solid ${th.bd}`:'none',paddingLeft:isBeat?1:0}}>
+                        <div key={si} style={{display:'flex',flexDirection:'column',alignItems:'center',gap:0,flex:'1 0 0',borderLeft:isBeat?`2px solid ${th.bd}`:'none',paddingLeft:isBeat?1:0,background:inColSel?'#ffaa0015':'transparent',borderRadius:2}}>
                           {isTK&&on&&<div style={{width:'100%',height:18,background:th.bgP,borderRadius:'2px 2px 0 0',position:'relative',cursor:'ns-resize'}}
                             onMouseDown={e=>{e.preventDefault();const rect=e.currentTarget.getBoundingClientRect();const handle=(ev:any)=>{const y=1-Math.max(0,Math.min(1,(ev.clientY-rect.top)/rect.height));setVel(ci,si,Math.round(y*127));};const up=()=>{window.removeEventListener('mousemove',handle);window.removeEventListener('mouseup',up);};window.addEventListener('mousemove',handle);window.addEventListener('mouseup',up);const y=1-Math.max(0,Math.min(1,(e.clientY-rect.top)/rect.height));setVel(ci,si,Math.round(y*127));}}>
                             <div style={{position:'absolute',bottom:0,width:'100%',height:`${vel/127*100}%`,background:col+'99',borderRadius:2}}/>
