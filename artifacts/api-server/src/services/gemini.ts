@@ -1,6 +1,6 @@
 import { GoogleGenerativeAI, Part } from "@google/generative-ai";
 
-const MODEL = "gemini-1.5-flash";
+const MODEL = "gemini-2.0-flash";
 const INLINE_SIZE_LIMIT = 18 * 1024 * 1024; // 18 MB — stay under 20 MB limit
 
 function client(): GoogleGenerativeAI {
