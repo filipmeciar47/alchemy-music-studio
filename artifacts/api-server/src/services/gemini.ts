@@ -6,7 +6,7 @@ const INLINE_SIZE_LIMIT = 18 * 1024 * 1024; // 18 MB — stay under 20 MB limit
 function client(): GoogleGenerativeAI {
   const key = process.env["GEMINI_API_KEY"];
   if (!key) throw new Error("GEMINI_API_KEY is not set");
-  return new GoogleGenerativeAI(key, { apiVersion: "v1" });
+  return new GoogleGenerativeAI(key);
 }
 
 export interface SmartPreviewResult {
@@ -47,7 +47,7 @@ export async function smartPreview(
   mimeType: string,
 ): Promise<SmartPreviewResult> {
   const gen = client();
-  const model = gen.getGenerativeModel({ model: MODEL });
+  const model = gen.getGenerativeModel({ model: MODEL }, { apiVersion: "v1" });
 
   const audioPart = toAudioPart(audioBuffer, mimeType);
 
@@ -76,7 +76,7 @@ export async function analyzeStems(
   context: { genre: string; bpm: number | null; key: string | null },
 ): Promise<StemAnalysis[]> {
   const gen = client();
-  const model = gen.getGenerativeModel({ model: MODEL });
+  const model = gen.getGenerativeModel({ model: MODEL }, { apiVersion: "v1" });
 
   const parts: Part[] = [];
 
@@ -139,7 +139,7 @@ export async function verifyZoomExtraction(
   fragmentRange: { start: string; end: string },
 ): Promise<ZoomVerification> {
   const gen = client();
-  const model = gen.getGenerativeModel({ model: MODEL });
+  const model = gen.getGenerativeModel({ model: MODEL }, { apiVersion: "v1" });
 
   const parts: Part[] = [];
   for (const stem of stems) {
