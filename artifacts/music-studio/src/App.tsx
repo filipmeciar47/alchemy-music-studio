@@ -376,6 +376,8 @@ export default function App(){
   const[abSnap,setAbSnap]=useState<{before:any,after:any,showing:'A'|'B'}|null>(null);
   const[abPending,setAbPending]=useState<any>(null);
   // Decompositor state
+  const[seqOneShot,setSeqOneShot]=useState(false);
+  const[seqClip,setSeqClip]=useState<{steps:boolean[],velocities:number[]}|null>(null);
   const[showDecompose,setShowDecompose]=useState(false);
   const[decompMode,setDecompMode]=useState<'track'|'stem'|'zoom'>('track');
   const[decompStep,setDecompStep]=useState('');
@@ -392,7 +394,7 @@ export default function App(){
   const th=mode==='tekno'?TK:C;
   const cols=mode==='tekno'?TKC:TC;
 
-  const actxR=useRef<AudioContext|null>(null),cvR=useRef<HTMLCanvasElement|null>(null),srcR=useRef<AudioBufferSourceNode|null>(null),afR=useRef<number|null>(null),stR=useRef(0),sdR=useRef<{s:number}|null>(null),ceR=useRef<HTMLDivElement|null>(null),anR=useRef<AnalyserNode|null>(null),seqTR=useRef<any>(null),nstR=useRef(0),csR=useRef(0),recRef=useRef<any>(null),chRef=useRef<any[]>([]),smpRef=useRef<any[]>([]),bpmRef=useRef(128),swRef=useRef(50),mvR=useRef(1),masterGR=useRef<GainNode|null>(null),scR=useRef(16);
+  const actxR=useRef<AudioContext|null>(null),cvR=useRef<HTMLCanvasElement|null>(null),srcR=useRef<AudioBufferSourceNode|null>(null),afR=useRef<number|null>(null),stR=useRef(0),sdR=useRef<{s:number}|null>(null),ceR=useRef<HTMLDivElement|null>(null),anR=useRef<AnalyserNode|null>(null),seqTR=useRef<any>(null),nstR=useRef(0),csR=useRef(0),recRef=useRef<any>(null),chRef=useRef<any[]>([]),smpRef=useRef<any[]>([]),bpmRef=useRef(128),swRef=useRef(50),mvR=useRef(1),masterGR=useRef<GainNode|null>(null),scR=useRef(16),seqOneShotR=useRef(false);
   const getCtx=useCallback(()=>{if(!actxR.current)actxR.current=new(window.AudioContext||(window as any).webkitAudioContext)();return actxR.current;},[]);
   const cur=sel!=null?samples[sel]:null;
   const lastReply=[...msgs].reverse().find(m=>m.role==='assistant')?.content||'';
@@ -403,6 +405,7 @@ export default function App(){
   useEffect(()=>{bpmRef.current=bpm;},[bpm]);
   useEffect(()=>{swRef.current=swing;},[swing]);
   useEffect(()=>{scR.current=stepCount;},[stepCount]);
+  useEffect(()=>{seqOneShotR.current=seqOneShot;},[seqOneShot]);
   useEffect(()=>{mvR.current=masterVol;if(masterGR.current)masterGR.current.gain.value=masterVol;},[masterVol]);
   useEffect(()=>()=>{if(seqTR.current)clearInterval(seqTR.current);},[]);
   useEffect(()=>{const c=cvR.current;if(!c)return;const ro=new ResizeObserver(()=>{c.width=c.offsetWidth;c.height=c.offsetHeight;drawWf(c,cur?.buffer,wfSel,playPos,th);});ro.observe(c);return()=>ro.disconnect();},[cur,wfSel,playPos,th]);
@@ -463,11 +466,11 @@ export default function App(){
   // Sequencer playback with swing
   const startSeq=useCallback(()=>{const ctx=getCtx();if(ctx.state==='suspended')ctx.resume();stopSeq();
     if(!masterGR.current){masterGR.current=ctx.createGain();masterGR.current.connect(ctx.destination);}
-    const master=masterGR.current;master.gain.value=mvR.current;
+    const master=masterGR.current;master.gain.cancelScheduledValues(ctx.currentTime);master.gain.setValueAtTime(mvR.current,ctx.currentTime);
     csR.current=0;nstR.current=ctx.currentTime+.05;setSeqPlaying(true);
     // Live scheduler — reads latest state from refs each tick so volume/pan/EQ/mute/solo/BPM apply in real time
     const sched=()=>{const chs=chRef.current,smp=smpRef.current,bp=bpmRef.current,sw=swRef.current,sc=Math.max(1,scR.current|0);const stepDur=60/bp/4;const solo=chs.some((c:any)=>c.solo);
-      while(nstR.current<ctx.currentTime+.1){const st=csR.current%sc;setCurStep(st);const swOff=st%2===1?(sw-50)/100*stepDur:0;
+      while(nstR.current<ctx.currentTime+.1){if(seqOneShotR.current&&csR.current>0&&csR.current%sc===0){clearInterval(seqTR.current);seqTR.current=null;setSeqPlaying(false);setCurStep(-1);break;}const st=csR.current%sc;setCurStep(st);const swOff=st%2===1?(sw-50)/100*stepDur:0;
       for(const ch of chs){if(ch.mute||(solo&&!ch.solo)||!ch.steps?.[st])continue;const s=smp[ch.sampleIdx];if(!s)continue;
         const ratch=ch.ratchets?.[st]||1;const vel=(ch.velocities?.[st]??80)/127;
         for(let r=0;r<ratch;r++){const src=ctx.createBufferSource();
@@ -479,7 +482,7 @@ export default function App(){
           const g=ctx.createGain();g.gain.value=ch.vol*vel/ratch;node.connect(g);if(ch.pan!==0){const pan=ctx.createStereoPanner();pan.pan.value=ch.pan;g.connect(pan);pan.connect(master);}else g.connect(master);src.start(nstR.current+swOff+r*(stepDur/ratch));}}
       nstR.current+=stepDur;csR.current++;}};
     seqTR.current=setInterval(sched,25);},[getCtx]);
-  const stopSeq=useCallback(()=>{if(seqTR.current)clearInterval(seqTR.current);seqTR.current=null;setSeqPlaying(false);setCurStep(-1);},[]);
+  const stopSeq=useCallback(()=>{if(seqTR.current)clearInterval(seqTR.current);seqTR.current=null;if(masterGR.current){const t=masterGR.current.context.currentTime;masterGR.current.gain.cancelScheduledValues(t);masterGR.current.gain.setValueAtTime(0,t);}setSeqPlaying(false);setCurStep(-1);},[]);
 
   const doBounce=useCallback((name?: string)=>{const ctx=getCtx();const buf=bouncePat(channels,samples,bpm,stepCount,swing,ctx);addSample(name||`Pat${curPat}_${bpm}`,buf);},[channels,samples,bpm,stepCount,swing,curPat,getCtx,addSample]);
   const doExport=useCallback((buf?: AudioBuffer,name?: string)=>{const b=buf||cur?.buffer;if(!b)return;const blob=bufToWav(b);const reader=new FileReader();reader.onload=()=>{setExportAudio({url:reader.result as string,name:`${name||cur?.name||'export'}.wav`});};reader.readAsDataURL(blob);},[cur]);
@@ -673,6 +676,7 @@ export default function App(){
       {recording&&<div style={{width:50,height:6,background:th.bgD,borderRadius:3,overflow:'hidden'}}><div style={{height:'100%',width:`${recLvl*100}%`,background:recLvl>.8?th.red:th.ac,transition:'width .05s'}}/></div>}
       <div style={{width:1,height:24,background:th.bd}}/>
       <button style={{...sb(seqPlaying,th.ac2,th), padding: '6px 14px', fontWeight: 600, minWidth: 60}} onClick={seqPlaying?stopSeq:startSeq}>{seqPlaying?'STOP SEQ':'PLAY SEQ'}</button>
+      <button onClick={()=>setSeqOneShot(p=>!p)} style={{...sb(seqOneShot,th.ac3,th),fontSize:15,padding:'6px 8px',lineHeight:1}} title={seqOneShot?'One-shot: prehrá raz a zastaví':'Loop: hrá dokola'}>{seqOneShot?'→1':'↻'}</button>
       <div style={{display:'flex',alignItems:'center',gap:4,background:th.bgL,borderRadius:4,padding:'4px 8px',border:`1px solid ${th.bd}`}}>
         <span style={{fontSize:10,fontWeight:600,color:th.txD,letterSpacing:1}}>BPM</span>
         <input type="number" value={bpm} onChange={e=>setBpm(Math.max(40,Math.min(300,+e.target.value||128)))} style={{width:44,background:'transparent',border:'none',color:th.ac,fontSize:14,fontWeight:700,textAlign:'center',outline:'none',fontFamily:'inherit'}}/>
@@ -857,7 +861,7 @@ export default function App(){
                 <div style={{width:LBL,flexShrink:0,fontSize:9,fontWeight:700,color:th.txD,letterSpacing:1,textTransform:'uppercase'}}>Hlavný track ({stepCount/4} {stepCount/4===1?'takt':stepCount/4<5?'takty':'taktov'})</div>
                 <div style={{display:'flex',gap:2,flex:1}}>
                   {Array.from({length:stepCount}).map((_,si)=>{const isBeat=si%4===0;const ph=si===curStep&&seqPlaying;return(
-                    <div key={si} style={{flex:'1 0 0',textAlign:'center',fontSize:9,fontWeight:700,color:ph?'#fff':isBeat?th.ac:th.txD,paddingBottom:2,borderLeft:isBeat?`2px solid ${th.bd}`:'1px solid transparent',background:ph?th.ac2+'66':'transparent',borderRadius:2}}>{isBeat?(si/4+1):'·'}</div>);})}
+                    <div key={si} onClick={()=>setChannels((chs:any[])=>chs.map((ch:any)=>{const s=[...(ch.steps||[])];while(s.length<=si)s.push(false);s[si]=!s[si];return{...ch,steps:s};}))} style={{flex:'1 0 0',textAlign:'center',fontSize:9,fontWeight:700,color:ph?'#fff':isBeat?th.ac:th.txD,paddingBottom:2,borderLeft:isBeat?`2px solid ${th.bd}`:'1px solid transparent',background:ph?th.ac2+'66':'transparent',borderRadius:2,cursor:'pointer'}} title={`Klik = prepni stĺpec ${si+1} pre všetky stopy`}>{isBeat?(si/4+1):'·'}</div>);})}
                 </div>
               </div>
 
@@ -878,9 +882,11 @@ export default function App(){
                         <button onClick={()=>nudgeCh(ci,1)} style={{...sb(false,null,th),fontSize:10,padding:'1px 5px'}} title="Posuň neskôr (o 1 krok vpravo)">▶</button>
                         <input type="range" min={0} max={1.5} step={.01} value={ch.vol} onChange={e=>updCh(ci,'vol',+e.target.value)} style={{flex:1,height:5,accentColor:col}} title="Hlasitosť"/>
                         <button onClick={()=>updCh(ci,'mute',!ch.mute)} style={{...sb(ch.mute,th.red,th),fontSize:9,padding:'1px 5px'}}>M</button>
-                        <button onClick={()=>updCh(ci,'solo',!ch.solo)} style={{...sb(ch.solo,th.ac2,th),fontSize:9,padding:'1px 5px'}} title="Solo — hrá iba táto stopa (môžeš zapnúť viac)">S</button>
+                        <button onClick={()=>{updCh(ci,'solo',!ch.solo);if(!ch.solo&&!seqPlaying)startSeq();}} style={{...sb(ch.solo,th.ac2,th),fontSize:9,padding:'1px 5px'}} title="Solo — hrá iba táto stopa. Ak SEQ nebeží, spustí ho.">S</button>
                         <button onClick={()=>updCh(ci,'playMark',!ch.playMark)} style={{...sb(ch.playMark,th.ac3,th),fontSize:9,padding:'1px 5px'}} title="Označ pre selektívne prehranie (▶ Označené)">★</button>
                         <button onClick={()=>updCh(ci,'truncate',!ch.truncate)} style={{...sb(ch.truncate,null,th),fontSize:9,padding:'1px 5px'}} title="Orezať zvuk na dĺžku stepu">✂</button>
+                        <button onClick={()=>setSeqClip({steps:[...(ch.steps||[])],velocities:[...(ch.velocities||[])]})} style={{...sb(false,null,th),fontSize:9,padding:'1px 5px'}} title="Kopírovať kroky tejto stopy do schránky">⊞</button>
+                        {seqClip&&<button onClick={()=>setChannels((p:any[])=>p.map((c:any,j:number)=>j===ci?{...c,steps:[...seqClip.steps],velocities:[...seqClip.velocities]}:c))} style={{...sb(true,th.ac3,th),fontSize:9,padding:'1px 5px'}} title="Prilepiť kroky zo schránky">⊟</button>}
                       </div>
                       {isTK&&<div style={{display:'flex',gap:3}}>
                         <button onClick={()=>updCh(ci,'isKick',!ch.isKick)} style={{...sb(ch.isKick,th.ac3,th),fontSize:8,padding:'1px 5px',flex:1}} title="Kick (zdroj sidechain)">KICK</button>
