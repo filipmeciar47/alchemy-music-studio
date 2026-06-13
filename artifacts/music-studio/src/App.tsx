@@ -421,8 +421,9 @@ export default function App(){
         return{steps,velocities,colRange:null};
       });
       setSeqClip(clip);
-      const colInfo=cr?` (stĺpce ${cr[0]+1}–${cr[1]+1})`:'';
-      setLog(p=>[...p,`⊞ Skopírované ${sel.length} stop(y)${colInfo} — vyber cieľ a vlep`]);
+      setSeqSelRows(new Set());
+      const colInfo=cr?` (st. ${cr[0]+1}–${cr[1]+1})`:'';
+      setLog(p=>[...p,`⊞ Skopírované ${sel.length} stop(y)${colInfo} — vyber cieľové stopy a Ctrl+V`]);
     };
     const doPaste=(clip:any[])=>{
       const targets=Array.from(seqSelRows);if(!targets.length)return;
@@ -819,19 +820,32 @@ export default function App(){
               <button onClick={()=>{setSeqSelMode(p=>!p);setSeqSelRows(new Set());setSeqSelCols(null);}} style={{...sb(seqSelMode,'#ffaa00',th),fontSize:10,padding:'3px 10px',fontWeight:700}} title="Zapni/vypni režim výberu (stopy + stĺpce)">📋 {seqSelMode?'Výber ZAP':'Výber'}</button>
               {seqSelMode&&<span style={{fontSize:9,color:th.txD,padding:'0 2px'}}>{seqSelRows.size>0?`${seqSelRows.size} stop(y)`:''}{seqSelCols?` · st. ${seqSelCols[0]+1}–${seqSelCols[1]+1}`:seqSelRows.size>0?' · všetky stĺpce':''}</span>}
               {seqSelMode&&seqSelCols&&<button onClick={()=>setSeqSelCols(null)} style={{...sb(false,null,th),fontSize:9,padding:'2px 7px'}} title="Zrušiť výber stĺpcov (kopírovať všetky)">× stĺpce</button>}
-              {seqSelMode&&seqSelRows.size>0&&<button onClick={()=>{
+              {seqSelMode&&seqSelRows.size>0&&!seqClip&&<button onClick={()=>{
                 const cr=seqSelCols;
                 const clip=Array.from(seqSelRows).map(i=>{const ch=channels[i];if(!ch)return{steps:[],velocities:[],colRange:cr};const steps=[...(ch.steps||[])];const velocities=[...(ch.velocities||[])];if(cr){return{steps:steps.map((v:boolean,k:number)=>k>=cr[0]&&k<=cr[1]?v:false),velocities:velocities.map((v:number,k:number)=>k>=cr[0]&&k<=cr[1]?v:80),colRange:cr};}return{steps,velocities,colRange:null};});
                 setSeqClip(clip);
-                setLog(p=>[...p,`⊞ Skopírované ${clip.length} stop(y)${cr?` (st. ${cr[0]+1}–${cr[1]+1})`:''}`]);
-              }} style={{...sb(false,'#ffaa00',th),fontSize:10,padding:'3px 10px',fontWeight:700}} title="Kopírovať výber (Ctrl+C)">⊞ Kopírovať</button>}
+                setSeqSelRows(new Set());
+                setLog(p=>[...p,`⊞ Skopírované ${clip.length} stop(y)${cr?` (st. ${cr[0]+1}–${cr[1]+1})`:''}  →  teraz vyber cieľové stopy a klikni Prilepiť`]);
+              }} style={{...sb(false,'#ffaa00',th),fontSize:10,padding:'3px 10px',fontWeight:700}} title="Kopírovať výber do schránky (Ctrl+C)">⊞ Kopírovať</button>}
+              {seqSelMode&&seqClip&&<span style={{fontSize:9,color:'#ffaa00',padding:'0 4px',display:'flex',alignItems:'center',gap:4}}>
+                📋 {seqClip.length}× {seqClip[0]?.colRange?`st.${seqClip[0].colRange[0]+1}–${seqClip[0].colRange[1]+1}`:'všetky'}
+                {seqSelRows.size===0&&<span style={{color:th.txD}}> ← vyber cieľové stopy</span>}
+              </span>}
               {seqSelMode&&seqClip&&seqSelRows.size>0&&<button onClick={()=>{
                 const clip=seqClip;if(!clip)return;
                 const targets=Array.from(seqSelRows);
                 setChannels((p:any[])=>p.map((ch:any,i:number)=>{const tIdx=targets.indexOf(i);if(tIdx<0)return ch;const src=clip[tIdx%clip.length];if(src.colRange){const ns=[...(ch.steps||[])];const nv=[...(ch.velocities||[])];for(let c=src.colRange[0];c<=src.colRange[1];c++){ns[c]=src.steps[c]??false;nv[c]=src.velocities[c]??80;}return{...ch,steps:ns,velocities:nv};}return{...ch,steps:[...src.steps],velocities:[...src.velocities]};}));
+                setSeqSelRows(new Set());
                 setLog(p=>[...p,`⊟ Prilepené do ${targets.length} stop(y)`]);
               }} style={{...sb(true,th.ac3,th),fontSize:10,padding:'3px 10px',fontWeight:700}} title="Prilepiť do vybraných stôp (Ctrl+V)">⊟ Prilepiť</button>}
-              {seqSelMode&&seqClip&&<span style={{fontSize:9,color:'#ffaa00',padding:'0 4px'}}>📋 {seqClip.length}× {seqClip[0]?.colRange?`st.${seqClip[0].colRange[0]+1}–${seqClip[0].colRange[1]+1}`:'všetky'}</span>}
+              {seqSelMode&&seqClip&&<button onClick={()=>{setSeqClip(null);setSeqSelRows(new Set());}} style={{...sb(false,null,th),fontSize:9,padding:'2px 7px'}} title="Vymazať schránku">× schránka</button>}
+              {seqSelMode&&seqSelRows.size>0&&seqClip&&<button onClick={()=>{
+                const cr=seqSelCols;
+                const clip=Array.from(seqSelRows).map(i=>{const ch=channels[i];if(!ch)return{steps:[],velocities:[],colRange:cr};const steps=[...(ch.steps||[])];const velocities=[...(ch.velocities||[])];if(cr){return{steps:steps.map((v:boolean,k:number)=>k>=cr[0]&&k<=cr[1]?v:false),velocities:velocities.map((v:number,k:number)=>k>=cr[0]&&k<=cr[1]?v:80),colRange:cr};}return{steps,velocities,colRange:null};});
+                setSeqClip(clip);
+                setSeqSelRows(new Set());
+                setLog(p=>[...p,`⊞ Prepísaná schránka — ${clip.length} stop(y)${cr?` (st. ${cr[0]+1}–${cr[1]+1})`:''}`]);
+              }} style={{...sb(false,'#ffaa0088',th),fontSize:9,padding:'2px 7px'}} title="Nahradiť schránku novým výberom">⊞ Nové kopírovanie</button>}
               {channels.some((c:any)=>c.playMark)&&<button onClick={()=>{const marked=channels.filter((c:any)=>c.playMark);if(!marked.length)return;stopSeq();const ctx=getCtx();if(ctx.state==='suspended')ctx.resume();if(!masterGR.current){masterGR.current=ctx.createGain();masterGR.current.connect(ctx.destination);}masterGR.current.gain.value=mvR.current;csR.current=0;nstR.current=ctx.currentTime+.05;setSeqPlaying(true);const sched=()=>{const chs=chRef.current.filter((_:any,i:number)=>chRef.current[i]?.playMark);const smp=smpRef.current,bp=bpmRef.current,sw=swRef.current,sc=Math.max(1,scR.current|0);const stepDur=60/bp/4;while(nstR.current<ctx.currentTime+.1){const st=csR.current%sc;setCurStep(st);const swOff=st%2===1?(sw-50)/100*stepDur:0;for(const ch of chs){if(ch.mute||!ch.steps?.[st])continue;const s=smp[ch.sampleIdx];if(!s)continue;const ratch=Math.max(1,Math.min(8,Math.floor(Number(ch.ratchets?.[st])||1)));const vel=(ch.velocities?.[st]??80)/127;for(let r=0;r<ratch;r++){const src=ctx.createBufferSource();src.buffer=s.buffer;if(ch.pitch&&isFinite(ch.pitch)&&ch.pitch>0&&ch.pitch!==1)src.playbackRate.value=ch.pitch;const g=ctx.createGain();g.gain.value=Math.max(0,ch.vol*vel/ratch);src.connect(g);g.connect(masterGR.current!);const when=nstR.current+swOff+r*(stepDur/ratch);src.start(Math.max(ctx.currentTime,when));}}nstR.current+=stepDur;csR.current++;}};seqTR.current=setInterval(sched,25);}} style={{...sb(true,th.ac3,th),fontSize:10,padding:'3px 10px'}} title="Prehrať iba označené stopy (★)">▶ Označené</button>}
             </div>
 
